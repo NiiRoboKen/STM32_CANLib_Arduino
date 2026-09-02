@@ -1,5 +1,6 @@
-#include "STM32F303K8_CAN.hpp"
+#include "STM32_CAN.hpp"
 
+#ifdef false
 STM32CAN can;
 
 void setup(){
@@ -29,3 +30,4 @@ void loop(){
     can.send(msg);
     delay(1000);
 }
+#endif
