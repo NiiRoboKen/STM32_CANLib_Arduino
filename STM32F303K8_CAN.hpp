@@ -20,7 +20,6 @@ CANのTx,Rxに使用するピンを設定します。
 上のほうにあるenum CANPinTypesによって、このようなピンを設定できます。
 PA11_PA12,
 PB8_PB9
-PD0_PD1
 */
 
 #pragma once
@@ -41,7 +40,7 @@ enum CAN_FORMAT {STANDARD_FORMAT = 0, EXTENDED_FORMAT};
 /* CANメッセージの種類を表す記号名 */
 enum CAN_FRAME {DATA_FRAME = 0, REMOTE_FRAME};
 
-enum CANPinTypes {PA11_PA12, PB8_PB9, PD0_PD1};
+enum CANPinTypes {PA11_PA12, PB8_PB9};
 
 
 struct CAN_msg_t{
@@ -318,21 +317,28 @@ inline void STM32CAN::CANSetFilter(uint8_t index, uint8_t scale, uint8_t mode, u
 
 }
 
+/*
+struct CAN_bit_timing_config_t{
+  uint8_t TS2;
+  uint8_t TS1;
+  uint8_t BRP;
+};
+*/
 
 inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
     switch(baud){
-      case (long)50E3:
+      case 50000:
         return {2, 13, 45};
-      case (long)100E3:
+      case 100000:
         return {2, 15, 20};
-      case (long)125E3:
+      case 125000:
         return {2, 13, 18};
-      case (long)250E3:
+      case 250000:
         return {2, 13, 9};
-      case (long)500E3:
+      case 500000:
         return {2, 15, 4};
       case (long)1000E3:
-        return {2, 15, 2};
+        return {2, 13, 2};//return {2, 15, 2};
       default:
         return {2, 13, 45};
     }
@@ -348,7 +354,7 @@ inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
  *   125000
  *   250000
  *   500000
- *   100000
+ *   1000000
  * @params: SelectPin
  *   CANのTx,Rxに使用するピンを設定します。
  *   上のほうにあるenum CANPinTypesによって、このようなピンを設定できます。
@@ -368,14 +374,16 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
       CANSetGpio(GPIOA, 11, STM32_AF9);         // STM32_AF9にPA11を設定
       CANSetGpio(GPIOA, 12, STM32_AF9);         // STM32_AF9にPA12を設定
       break;
-    /*
     case PB8_PB9:
       RCC->AHBENR |= 0x40000UL;           // GPIOBクロックを有効化
       CANSetGpio(GPIOB, 8, STM32_AF9);          // STM32_AF9にPB8を設定
       CANSetGpio(GPIOB, 9, STM32_AF9);          // STM32_AF9にPB9を設定
       break;
-    */
-
+    /*case 2:
+      RCC->AHBENR |= 0x100000UL;          // Enable GPIOD clock 
+      CANSetGpio(GPIOD, 0, STM32_AF7);          // STM32_AF7をPD0に設定
+      CANSetGpio(GPIOD, 1, STM32_AF7);          // STM32_AF7をPD1に設定
+      break;*/
     default:
       return false;
       //例外値は無視
@@ -389,17 +397,34 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   CAN1->MCR = 0;
   CAN1->MCR |= CAN_MCR_ABOM;
 
+  //IRNQを1にして書き込み可能にする
+  CAN1->MCR |= CAN_MCR_INRQ;
+
   // ビットレートを設定 
   CAN_bit_timing_config_t configData = ConvBaudrate(bitrate);
 
-  //IRNQを1にして書き込み可能にする
-  CAN1->MCR |= CAN_MCR_INRQ;
+  Serial.printf("TS2: %d\n",configData.TS2);
+  Serial.printf("TS1: %d\n",configData.TS1);
+  Serial.printf("BRP: %d\n",configData.BRP);
   
   CAN1->BTR &= ~(((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF)); 
   CAN1->BTR |= (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF);
 
   #ifdef DEBUG
   //CAN1->BTR |= CAN_BTR_LBKM;
+  /*
+  uint32_t btr = CAN1->BTR;
+
+  uint32_t brp = (btr & 0x3FF) + 1;
+  uint32_t ts1 = ((btr >> 16) & 0x0F) + 1;
+  uint32_t ts2 = ((btr >> 20) & 0x07) + 1;
+  uint32_t sjw = ((btr >> 24) & 0x03) + 1;
+
+  Serial.printf("BRP = %lu\n", brp);
+  Serial.printf("TS1 = %lu\n", ts1);
+  Serial.printf("TS2 = %lu\n", ts2);
+  Serial.printf("SJW = %lu\n", sjw);
+  */
   #endif
 
   //書き込みを終了する
