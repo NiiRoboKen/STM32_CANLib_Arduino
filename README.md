@@ -1,6 +1,6 @@
 # STM32_CANLib_Arduino
 未完成・改造中
-STM32 F303, F446 用のArduinoフレームワークCANライブラリ（F303とF446間での動作確認中）
+STM32 F303K8, F446RE 用のArduinoフレームワークCANライブラリ（F303とF446間での動作確認中）
 
 ---
 
