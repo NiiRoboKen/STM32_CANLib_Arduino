@@ -1,5 +1,8 @@
 #include "STM32_CAN.hpp"
 
+//PA12_PA11, PB13_PB12
+
+
 #ifdef false
 STM32CAN can;
 

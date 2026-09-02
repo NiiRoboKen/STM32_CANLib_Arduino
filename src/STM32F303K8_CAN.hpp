@@ -20,6 +20,7 @@ CANのTx,Rxに使用するピンを設定します。
 上のほうにあるenum CANPinTypesによって、このようなピンを設定できます。
 PA11_PA12,
 PB8_PB9
+PD0_PD1
 */
 
 #pragma once
@@ -40,7 +41,7 @@ enum CAN_FORMAT {STANDARD_FORMAT = 0, EXTENDED_FORMAT};
 /* CANメッセージの種類を表す記号名 */
 enum CAN_FRAME {DATA_FRAME = 0, REMOTE_FRAME};
 
-enum CANPinTypes {PA11_PA12, PB8_PB9};
+enum CANPinTypes {PA11_PA12, PB8_PB9, PD0_PD1};
 
 
 struct CAN_msg_t{
@@ -372,11 +373,7 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
       CANSetGpio(GPIOB, 8, STM32_AF9);          // STM32_AF9にPB8を設定
       CANSetGpio(GPIOB, 9, STM32_AF9);          // STM32_AF9にPB9を設定
       break;
-    /*case 2:
-      RCC->AHBENR |= 0x100000UL;          // Enable GPIOD clock 
-      CANSetGpio(GPIOD, 0, STM32_AF7);          // STM32_AF7をPD0に設定
-      CANSetGpio(GPIOD, 1, STM32_AF7);          // STM32_AF7をPD1に設定
-      break;*/
+      
     default:
       return false;
       //例外値は無視
