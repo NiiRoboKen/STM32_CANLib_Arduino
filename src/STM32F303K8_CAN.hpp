@@ -368,12 +368,14 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
       CANSetGpio(GPIOA, 11, STM32_AF9);         // STM32_AF9にPA11を設定
       CANSetGpio(GPIOA, 12, STM32_AF9);         // STM32_AF9にPA12を設定
       break;
+    /*
     case PB8_PB9:
       RCC->AHBENR |= 0x40000UL;           // GPIOBクロックを有効化
       CANSetGpio(GPIOB, 8, STM32_AF9);          // STM32_AF9にPB8を設定
       CANSetGpio(GPIOB, 9, STM32_AF9);          // STM32_AF9にPB9を設定
       break;
-      
+    */
+
     default:
       return false;
       //例外値は無視
@@ -390,6 +392,8 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   // ビットレートを設定 
   CAN_bit_timing_config_t configData = ConvBaudrate(bitrate);
 
+  //IRNQを1にして書き込み可能にする
+  CAN1->MCR |= CAN_MCR_INRQ;
   
   CAN1->BTR &= ~(((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF)); 
   CAN1->BTR |= (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF);
@@ -397,6 +401,9 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   #ifdef DEBUG
   //CAN1->BTR |= CAN_BTR_LBKM;
   #endif
+
+  //書き込みを終了する
+  CAN1->MCR &= ~CAN_MCR_INRQ;
 
   // フィルターをデフォルトの値に設定
   CAN1->FMR |=   0x1UL; // フィルターを初期化状態にする
