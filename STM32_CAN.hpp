@@ -34,20 +34,44 @@ namespace stm32_can{
 class CanDriver{
   public:
     bool begin(long baudRate, uint8_t tx, uint8_t rx);
+
     bool send(uint16_t id, uint8_t data[8], uint8_t dlc);
+    bool send(uint16_t id, uint8_t data[8]);
+
     void onReceive(void (*callback)(twai_msg_t msg));
   
   private:
-    void convBaud();
-    void setupCAN();
-    
+    void convBaud(long baud);
+    void setupCAN(uint8_t tx, uint8_t rx);
+    bool sendDataToFIFO(twai_msg_t msgData);
     
 };
+
+//public
 
 bool CanDriver::begin(long baudRate, uint8_t tx, uint8_t rx){
   
 }
 
-void onReceive(){}
+bool CanDriver::send(uint16_t id, uint8_t data[8], uint8_t dlc){
+  
+}
+//dlc無し版
+bool CanDriver::send(uint16_t id, uint8_t data[8]){
+  
+}
+
+void CanDriver::onReceive(void (*callback)(twai_msg_t msg)){
+
+}
+
+//private
+
+//通信速度ごとに適切なクロック設定に変換するデータ
+void CanDriver::convBaud(long baud){
+  
+}
+
+
 }
 
