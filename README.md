@@ -9,39 +9,39 @@ STM32 F303K8, F446RE 用のArduinoフレームワークCANライブラリ（F303
 
 ### 例文
 ```
-#include "STM32F303K8_CAN.hpp"
+#include <Arduino.h>
+#include "STM32_CAN.hpp"
 
-STM32CAN can;
+CanDriver can;
 
-void setup(){
-  Serial.begin(115200);
-  can.begin(1000000, PA11_PA12);
+void canCallback(twai_message_t msg) {
+  Serial.printf("RX <- ID:0x%lX DLC:%d DATA:", msg.identifier, msg.data_length_code);
+  for (int i = 0; i < msg.data_length_code; i++) {
+    Serial.print(" %02X", msg.data[i]);
+  }
+  Serial.println();
 }
 
-void loop(){
-    CAN_msg_t rx;
+void setup() {
+  if(can.begin(1000E3, PA12_PA11)) {
+    Serial.println("OK");
+  }
+  can.onReceive(canCallback);
+}
 
-    if(can.receive(&rx)){
-        Serial.println(rx.id, HEX);
-        Serial.println(rx.data[0], HEX);
-        Serial.println(rx.data[1], HEX);
-    }
-
-    CAN_msg_t msg;
-
-    msg.id = 0x123;
-    msg.format = STANDARD_FORMAT;
-    msg.type = DATA_FRAME;
-    msg.len = 2; //dataの長さ
-    msg.data[0] = 0x11;
-    msg.data[1] = 0x22;
-
-
-    can.send(msg);
-    delay(1000);
+void loop() {
+  uint32_t id = 0x00;
+  uint8_t data[8] = {1,2,3,4,5,6,7,8};
+  can.send(id, data, sizeof(data));
+  delay(1000);
 }
 ```
 
 ---
 ## 注意点
+beginに渡すピンの設定
+f303: PA12_PA11 (tx/rx, CAN1)
+f446: PA12_PA11 (tx/rx, CAN1)
+      PB13_PB12 (tx/rx, CAN2)
+ESP32の方と同じ変数名にするために、twai_message_tとしています。
 未完成
