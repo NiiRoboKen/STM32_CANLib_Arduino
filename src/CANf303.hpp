@@ -1,5 +1,4 @@
 
-
 /*
 参考プログラム
 https://github.com/nopnop2002/Arduino-STM32-CAN/blob/master/stm32f303/stm32f303.ino
@@ -386,7 +385,8 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   // リファレンスマニュアル
   // https://www.st.com/content/ccc/resource/technical/document/reference_manual/4a/19/6e/18/9d/92/43/32/DM00043574.pdf/files/DM00043574.pdf/jcr:content/translations/en.DM00043574.pdf
 
-  RCC->APB1ENR |= 0x2000000UL;          // CANクロックの有効化
+  //RCC->APB1ENR |= 0x2000000UL;          // CANクロックの有効化
+  RCC->APB1ENR |= RCC_APB1ENR_CANEN;
 
   switch(SelectPin){
     case PA12_PA11:
@@ -401,27 +401,27 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
 
   CAN1->MCR |= 0x1UL;                   // CANを初期化状態にする
   while (!(CAN1->MSR & 0x1UL));         // 初期化状態になるのを待つ
-
-  //CAN1->MCR = 0x51UL;                 // ハードウェアの初期化(自動的に再送信しない)
+  //CAN1->MCR = 0x51UL;                   // ハードウェアの初期化(自動的に再送信しない)
   //CAN1->MCR = 0x41UL;                   // ハードウェアの初期化(自動的に再送信する)
   CAN1->MCR = 0;
   CAN1->MCR |= CAN_MCR_ABOM;
 
-  //IRNQを1にして書き込み可能にする
+  //書き込み可能にする
   CAN1->MCR |= CAN_MCR_INRQ;
 
   // ビットレートを設定 
   CAN_bit_timing_config_t configData = ConvBaudrate(bitrate);
 
-  Serial.printf("TS2: %d\n",configData.TS2);
-  Serial.printf("TS1: %d\n",configData.TS1);
-  Serial.printf("BRP: %d\n",configData.BRP);
+  //Serial.printf("TS2: %d\n",configData.TS2);
+  //Serial.printf("TS1: %d\n",configData.TS1);
+  //Serial.printf("BRP: %d\n",configData.BRP);
   
   CAN1->BTR &= ~(((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF)); 
   CAN1->BTR |= (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF);
 
-  #ifdef DEBUG
-  //CAN1->BTR |= CAN_BTR_LBKM;
+  #if defined(DEBUG)
+  Serial.println("ループバックを有効化します");
+  CAN1->BTR |= CAN_BTR_LBKM;
   /*
   uint32_t btr = CAN1->BTR;
 
@@ -429,7 +429,7 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   uint32_t ts1 = ((btr >> 16) & 0x0F) + 1;
   uint32_t ts2 = ((btr >> 20) & 0x07) + 1;
   uint32_t sjw = ((btr >> 24) & 0x03) + 1;
-
+  
   Serial.printf("BRP = %lu\n", brp);
   Serial.printf("TS1 = %lu\n", ts1);
   Serial.printf("TS2 = %lu\n", ts2);

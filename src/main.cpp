@@ -1,28 +1,65 @@
-#include <Arduino.h>
-#include "STM32_CAN.hpp"
+#include "CANf303.hpp"
 
-CanDriver can;
+STM32CAN can;
 
-void canCallback(twai_message_t msg) {
-  Serial.printf("RX <- ID:0x%lX DLC:%d DATA:", msg.identifier, msg.data_length_code);
-  for (int i = 0; i < msg.data_length_code; i++) {
-    Serial.printf(" %02X", msg.data[i]);
-  }
-  Serial.println();
+volatile uint32_t receivedCount = 0;
+
+void onCanReceive(twai_message_t msg)
+{
+  
+  /*
+    receivedCount++;
+
+    Serial.println("=== can RX ===");
+    Serial.printf("ID   : 0x%lX\n", msg.identifier);
+    Serial.printf("EXTD : %lu\n", msg.extd);
+    Serial.printf("RTR  : %lu\n", msg.rtr);
+    Serial.printf("DLC  : %u\n", msg.data_length_code);
+
+    Serial.print("DATA : ");
+
+    for (uint8_t i = 0; i < msg.data_length_code; i++) {
+        Serial.printf("%02X ", msg.data[i]);
+    }
+
+    Serial.println();*/
 }
 
-void setup() {
-  Serial.begin(115200);
-  Serial.println("start!");
-  if(can.begin(1000E3, PA12_PA11)) {
-    Serial.println("OK");
-  }
-  can.onReceive(canCallback);
+void setup()
+{
+    Serial.begin(115200);
+    delay(1000);
+
+    Serial.println("can loopback test");
+
+    if (!can.begin(500000, PA12_PA11)) {
+        Serial.println("失敗can initialization failed");
+        while (1);
+    }
+
+    can.onReceive(onCanReceive);
+
+    Serial.println("成功can initialized");
 }
 
 void loop() {
-  uint32_t id = 0x00;
-  uint8_t data[8] = {1,2,3,4,5,6,7,8};
-  can.send(id, data, sizeof(data));
-  delay(1000);
+    Serial.println("before send");
+
+    twai_message_t msg = {};
+    msg.extd = STANDARD_FORMAT;
+    msg.rtr = DATA_FRAME;
+    msg.identifier = 0x123;
+    msg.data_length_code = 8;
+
+    for (int i = 0; i < 8; i++) {
+        msg.data[i] = i;
+    }
+
+    Serial.println("calling send");
+    bool result = can.send(msg);
+    Serial.println("send returned");
+
+    Serial.printf("send result = %d\n", result);
+
+    delay(1000);
 }
