@@ -170,20 +170,6 @@ class STM32CAN{
       }
     }
 
-    void rxTask(void* param){
-      STM32CAN* self = static_cast<STM32CAN*>(param);
-      twai_message_t msg;
-
-      while(true){
-        //受信結果にメッセージが存在するかを調べる
-        if(receive(&msg)){
-          if (self->rxCallback) {
-            self->rxCallback(msg);
-          }
-        }
-      }
-    }
-
   private:
     //コールバック関数のポインタ
     void (*rxCallback)(twai_message_t msg) = nullptr;
@@ -212,7 +198,8 @@ class STM32CAN{
 
     bool CANInit(long bitrate, CANPinTypes selectPin);
 
-  private:
+    static void rxTask(void* param);
+
     RingBuffer<twai_message_t, CAN_TX_QUEUE_SIZE> txQueue;
     RingBuffer<twai_message_t, CAN_RX_QUEUE_SIZE> rxQueue;
     volatile bool txBusy = false;
@@ -498,6 +485,20 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   xTaskCreate(rxTask, "CAN_RX_Task", 4096, this, 2, NULL);
   
   return !!can1;
+}
+
+void STM32CAN::rxTask(void* param){
+  STM32CAN* self = static_cast<STM32CAN*>(param);
+  twai_message_t msg;
+
+  while(true){
+    //受信結果にメッセージが存在するかを調べる
+    if(self->receive(&msg)){
+      if (self->rxCallback) {
+        self->rxCallback(msg);
+      }
+    }
+  }
 }
 
 
