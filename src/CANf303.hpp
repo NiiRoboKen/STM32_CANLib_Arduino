@@ -22,6 +22,8 @@ PB8_PB9
 */
 
 #pragma once
+
+#include <STM32FreeRTOS.h>
 #include <Arduino.h>
 
 #define DEBUG
@@ -165,9 +167,19 @@ class STM32CAN{
         if(!rxQueue.enqueue(msg)){
           // overflow
         }
+      }
+    }
 
-        if (rxCallback) {
-            rxCallback(msg);
+    void rxTask(void* param){
+      STM32CAN* self = static_cast<STM32CAN*>(param);
+      twai_message_t msg;
+
+      while(true){
+        //受信結果にメッセージが存在するかを調べる
+        if(receive(&msg)){
+          if (self->rxCallback) {
+            self->rxCallback(msg);
+          }
         }
       }
     }
@@ -481,6 +493,9 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
     }
     delay(1);
   }
+
+  //受信タスクの追加
+  xTaskCreate(rxTask, "CAN_RX_Task", 4096, this, 2, NULL);
   
   return !!can1;
 }
