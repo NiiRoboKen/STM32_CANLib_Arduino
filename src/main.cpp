@@ -12,6 +12,8 @@ void canCallback(twai_message_t msg) {
 }
 
 void setup() {
+  Serial.begin(115200);
+  Serial.println("start!");
   if(can.begin(1000E3, PA12_PA11)) {
     Serial.println("OK");
   }
