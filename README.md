@@ -40,8 +40,8 @@ void loop() {
 ---
 ## 注意点
 beginに渡すピンの設定
-f303: PA12_PA11 (tx/rx, CAN1)
-f446: PA12_PA11 (tx/rx, CAN1)
-      PB13_PB12 (tx/rx, CAN2)
+<br>
+f303: PA12_PA11 (tx/rx, CAN1)<br>
+f446: PA12_PA11 (tx/rx, CAN1)<br>
+      PB13_PB12 (tx/rx, CAN2)<br>
 ESP32の方と同じ変数名にするために、twai_message_tとしています。
-未完成
