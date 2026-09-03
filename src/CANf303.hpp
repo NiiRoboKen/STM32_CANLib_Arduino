@@ -40,17 +40,25 @@ enum CAN_FORMAT {STANDARD_FORMAT = 0, EXTENDED_FORMAT};
 /* CANメッセージの種類を表す記号名 */
 enum CAN_FRAME {DATA_FRAME = 0, REMOTE_FRAME};
 
-enum CANPinTypes {PA11_PA12};
+enum CANPinTypes {PA12_PA11};
 
+struct twai_message_t{        //CAN_msg_tでは
+    uint32_t extd;            //format
+    uint32_t rtr;             //type
+    uint32_t identifier;      //id
+    uint8_t data_length_code; //len
+    uint8_t data[8];          //data[8]
+};
 
+#if false
 struct CAN_msg_t{
   uint32_t id;        /* 29 bit identifier                      */
   uint8_t  data[8];   /* Data field                             */
   uint8_t  len;       /* Length of data field in bytes          */
-  uint8_t  ch;        /* Object channel(Not use)                */
   uint8_t  format;    /* 0 - STANDARD, 1- EXTENDED IDENTIFIER   */
   uint8_t  type;      /* 0 - DATA FRAME, 1 - REMOTE FRAME       */
 };
+#endif
 
 struct CAN_bit_timing_config_t{
   uint8_t TS2;
@@ -128,13 +136,13 @@ class STM32CAN{
       return CANInit(bitrate, SelectPin);
     }
 
-    bool send(const CAN_msg_t& msg){
+    bool send(const twai_message_t& msg){
       bool ok = txQueue.enqueue(msg);
       if(ok) processTxQueue();
       return ok;
     }
 
-    bool receive(CAN_msg_t* msg){
+    bool receive(twai_message_t* msg){
       return rxQueue.dequeue(msg);
     }
 
@@ -142,23 +150,35 @@ class STM32CAN{
       return rxQueue.available();
     }
 
+    //コールバック
+    void onReceive(void (*callback)(twai_message_t msg)){
+      rxCallback = callback;
+    }
+
     void processTxQueue();
 
-    void CANReceiveHardware(CAN_msg_t* msg);
+    void CANReceiveHardware(twai_message_t* msg);
 
     void handleRxInterrupt(){
       while (CAN1->RF0R & 0x3UL){
-        CAN_msg_t msg;
+        twai_message_t msg;
         CANReceiveHardware(&msg);
         if(!rxQueue.enqueue(msg)){
           // overflow
+        }
+
+        if (rxCallback) {
+            rxCallback(msg);
         }
       }
     }
 
   private:
+    //コールバック関数のポインタ
+    void (*rxCallback)(twai_message_t msg) = nullptr;
+
     //内部関数を追加
-    bool CANSendToFreeMailbox(CAN_msg_t* msg);
+    bool CANSendToFreeMailbox(twai_message_t* msg);
 
 
     void CANSetGpio(
@@ -182,8 +202,8 @@ class STM32CAN{
     bool CANInit(long bitrate, CANPinTypes selectPin);
 
   private:
-    RingBuffer<CAN_msg_t, CAN_TX_QUEUE_SIZE> txQueue;
-    RingBuffer<CAN_msg_t, CAN_RX_QUEUE_SIZE> rxQueue;
+    RingBuffer<twai_message_t, CAN_TX_QUEUE_SIZE> txQueue;
+    RingBuffer<twai_message_t, CAN_RX_QUEUE_SIZE> rxQueue;
     volatile bool txBusy = false;
 
 };
@@ -203,7 +223,7 @@ inline void STM32CAN::processTxQueue(){
 
     txBusy = true;
     interrupts();
-    CAN_msg_t msg;
+    twai_message_t msg;
     while (true){
       // 空きMailbox無し→終了
       if (!(CAN1->TSR & (CAN_TSR_TME0 | CAN_TSR_TME1 | CAN_TSR_TME2))) break;
@@ -326,22 +346,22 @@ struct CAN_bit_timing_config_t{
 */
 
 inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
-    switch(baud){
-      case 50000:
-        return {2, 13, 45};
-      case 100000:
-        return {2, 15, 20};
-      case 125000:
-        return {2, 13, 18};
-      case 250000:
-        return {2, 13, 9};
-      case 500000:
-        return {2, 15, 4};
-      case (long)1000E3:
-        return {2, 13, 2};//return {2, 15, 2};
-      default:
-        return {2, 13, 45};
-    }
+  switch(baud){
+    case (long)50E3:
+      return {2, 13, 45};
+    case (long)100E3:
+      return {2, 15, 20};
+    case (long)125E3:
+      return {2, 13, 18};
+    case (long)250E3:
+      return {2, 13, 9};
+    case (long)500E3:
+      return {2, 15, 4};
+    case (long)1000E3:
+      return {2, 13, 2};//return {2, 15, 2};
+    default:
+      return {2, 13, 45};
+  }
 }
     
 /**
@@ -369,7 +389,7 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   RCC->APB1ENR |= 0x2000000UL;          // CANクロックの有効化
 
   switch(SelectPin){
-    case PA11_PA12:
+    case PA12_PA11:
       RCC->AHBENR |= 0x20000UL;           // GPIOAクロックの有効化
       CANSetGpio(GPIOA, 11, STM32_AF9);         // STM32_AF9にPA11を設定
       CANSetGpio(GPIOA, 12, STM32_AF9);         // STM32_AF9にPA12を設定
@@ -482,26 +502,26 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
  * @params CAN_rx_msg - CAN message structure for reception
  * 
  */
-inline void STM32CAN::CANReceiveHardware(CAN_msg_t* CAN_rx_msg){
+inline void STM32CAN::CANReceiveHardware(twai_message_t* CAN_rx_msg){
   uint32_t id = CAN1->sFIFOMailBox[0].RIR;
   if ((id & STM32_CAN_RIR_IDE) == 0) { // Standard frame format
-      CAN_rx_msg->format = STANDARD_FORMAT;;
-      CAN_rx_msg->id = (CAN_STD_ID_MASK & (id >> 21U));
+      CAN_rx_msg->extd = STANDARD_FORMAT;;
+      CAN_rx_msg->identifier = (CAN_STD_ID_MASK & (id >> 21U));
   } 
   else {                               // Extended frame format
-      CAN_rx_msg->format = EXTENDED_FORMAT;;
-      CAN_rx_msg->id = (CAN_EXT_ID_MASK & (id >> 3U));
+      CAN_rx_msg->extd = EXTENDED_FORMAT;;
+      CAN_rx_msg->identifier = (CAN_EXT_ID_MASK & (id >> 3U));
   }
 
   if ((id & STM32_CAN_RIR_RTR) == 0) { // Data frame
-      CAN_rx_msg->type = DATA_FRAME;
+      CAN_rx_msg->rtr = DATA_FRAME;
   }
   else {                               // Remote frame
-      CAN_rx_msg->type = REMOTE_FRAME;
+      CAN_rx_msg->rtr = REMOTE_FRAME;
   }
 
   
-  CAN_rx_msg->len = (CAN1->sFIFOMailBox[0].RDTR) & 0xFUL;
+  CAN_rx_msg->data_length_code = (CAN1->sFIFOMailBox[0].RDTR) & 0xFUL;
   
   CAN_rx_msg->data[0] = 0xFFUL &  CAN1->sFIFOMailBox[0].RDLR;
   CAN_rx_msg->data[1] = 0xFFUL & (CAN1->sFIFOMailBox[0].RDLR >> 8);
@@ -518,7 +538,7 @@ inline void STM32CAN::CANReceiveHardware(CAN_msg_t* CAN_rx_msg){
 }
 
 //空きMainboxにデータを送る
-inline bool STM32CAN::CANSendToFreeMailbox(CAN_msg_t* CAN_tx_msg){
+inline bool STM32CAN::CANSendToFreeMailbox(twai_message_t* CAN_tx_msg){
     uint8_t mailbox;
 
     // 空きMailbox探索
@@ -538,22 +558,22 @@ inline bool STM32CAN::CANSendToFreeMailbox(CAN_msg_t* CAN_tx_msg){
     uint32_t out = 0;
 
     // ID設定
-    if (CAN_tx_msg->format == EXTENDED_FORMAT) {
-        out = ((CAN_tx_msg->id & CAN_EXT_ID_MASK) << 3U)
+    if (CAN_tx_msg->extd == EXTENDED_FORMAT) {
+        out = ((CAN_tx_msg->identifier & CAN_EXT_ID_MASK) << 3U)
             | STM32_CAN_TIR_IDE;
     }
     else {
-        out = ((CAN_tx_msg->id & CAN_STD_ID_MASK) << 21U);
+        out = ((CAN_tx_msg->identifier & CAN_STD_ID_MASK) << 21U);
     }
 
     // RTR
-    if (CAN_tx_msg->type == REMOTE_FRAME) {
+    if (CAN_tx_msg->rtr == REMOTE_FRAME) {
         out |= STM32_CAN_TIR_RTR;
     }
 
     // DLC
     CAN1->sTxMailBox[mailbox].TDTR =
-        (CAN_tx_msg->len & 0xFUL);
+        (CAN_tx_msg->data_length_code & 0xFUL);
 
     // DATA LOW
     CAN1->sTxMailBox[mailbox].TDLR =

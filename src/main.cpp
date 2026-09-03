@@ -2,7 +2,13 @@
 
 //PA12_PA11, PB13_PB12
 
+void setup(){
 
+}
+
+void loop(){
+    
+}
 #ifdef false
 STM32CAN can;
 
