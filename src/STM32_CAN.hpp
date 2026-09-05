@@ -26,51 +26,7 @@ f303とf406のドライバをclassでラップする
 
 */
 
-/*
-//定数
-constexpr uint8_t STM32_AF7 = 0x07;
-constexpr uint8_t STM32_AF9 = 0x09;
-
-constexpr uint8_t CAN_TX_QUEUE_SIZE = 16;
-constexpr uint8_t CAN_RX_QUEUE_SIZE = 16;
-*/
-
-#if false
-struct CAN_msg_t{
-  uint32_t id;        /* 29 bit identifier                      */
-  uint8_t  data[8];   /* Data field                             */
-  uint8_t  len;       /* Length of data field in bytes          */
-  uint8_t  format;    /* 0 - STANDARD, 1- EXTENDED IDENTIFIER   */
-  uint8_t  type;      /* 0 - DATA FRAME, 1 - REMOTE FRAME       */
-};
-#endif
-
-/*
-struct twai_message_t{        //CAN_msg_tでは
-    uint32_t extd;            //format
-    uint32_t rtr;             //type
-    uint32_t identifier;      //id
-    uint8_t data_length_code; //len
-    uint8_t data[8];          //data[8]
-};
-*/
-
-//twai_msg_tの構造体をESP32の環境と同じように定義
-/*struct twai_message_t{
-  uint32_t extd = 1;
-  uint32_t rtr = 1;
-  uint32_t ss = 1;
-  uint32_t self = 1;
-  uint32_t dlc_non_comp = 1;
-  uint32_t reserved = 27;
-  uint32_t flags;
-  uint32_t identifier;
-
-  uint8_t  data_length_code;
-  uint8_t  data[8];
-};*/
-
-
+//ラッパークラス
 class CanDriver{
   public:
     bool begin(long baudRate, CANPinTypes pins);
@@ -82,9 +38,20 @@ class CanDriver{
   
   private:
     void (*rxCallback)(twai_message_t msg) = nullptr;
+
+    int WhichCanUsing(bool CAN1USE, bool CAN2USE){
+      if(CAN1USE){
+        CAN1USING = true;
+      }else if(CAN2USE){
+        CAN2USING = true;      
+      }
+    };
+    
+    bool CAN1USING = false;
+    bool CAN2USING = false;
 };
 
-//ラッパー
+
 #if defined(STM32F3xx)
 STM32CAN Can1;
 
@@ -96,6 +63,7 @@ void CanDriver::onReceive(void (*callback)(twai_message_t msg)){
 }
 
 bool CanDriver::begin(long baudRate, CANPinTypes pins){
+  WhichCanUsing(true, false);
   //初期化
   return Can1.begin(baudRate, pins);
 }
@@ -113,5 +81,59 @@ bool CanDriver::send(uint16_t id, uint8_t data[8], uint8_t dlc){
 }
 
 #elif defined(STM32f4xx)
+
+//446にはCAN1とCAN2があるため、そこをしっかり状態管理すること
+
+//先に作られたインスタンスをCAN1として扱う
+#ifndef CAN1USE
+#define CAN1USE
+STM32CAN Can1;
+#endif
+#ifndef CAN2USE
+#define CAN2USE
+STM32CAN Can2;
+#endif
+
+void CanDriver::onReceive(void (*callback)(twai_message_t msg)){
+  rxCallback = callback;
+
+  //コールバックが登録されていたら登録
+  #ifdef CAN1USE
+  if(rxCallback) Can1.onReceive(rxCallback);
+  #endif
+  #ifdef CAN2USE
+  if(rxCallback) Can2.onReceive(rxCallback);
+  #endif
+}
+
+bool CanDriver::begin(long baudRate, CANPinTypes pins){
+  //初期化
+  
+  #ifdef CAN1USE
+  WhichCanUsing(true, false);
+  return Can1.begin(baudRate, pins, false);
+  #endif
+  #ifdef CAN2USE
+  WhichCanUsing(false, true);
+  return Can2.begin(baudRate, pins, true);
+  #endif
+}
+
+bool CanDriver::send(uint16_t id, uint8_t data[8], uint8_t dlc){
+  twai_message_t msg;
+  //msgにidとdataの中身、dlcをセットする
+  msg.identifier = id;
+  msg.extd = 0;
+  msg.rtr = 0;
+  msg.data_length_code = dlc;
+  memcpy(msg.data, data, dlc);
+
+  #ifdef CAN1USE
+  return Can1.send(msg);
+  #endif
+  #ifdef CAN2USE
+  return Can2.send(msg);
+  #endif
+}
 
 #endif

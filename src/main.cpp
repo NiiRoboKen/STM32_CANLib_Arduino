@@ -51,6 +51,8 @@ void setup(){
     Serial.println("CANの初期化成功");
 }
 
+extern volatile uint32_t tickHookCount;
+
 void loop() {
 
     twai_message_t msg = {};
@@ -63,7 +65,6 @@ void loop() {
         msg.data[i] = i;
     }
 
-    Serial.println("calling send");
     bool result = can.send(msg);
     Serial.printf("send result = %d\n", result);
 
@@ -84,5 +85,8 @@ void loop() {
     //Serial.printf("received count: %d\n", receivedCount);
     //Serial.printf("can.available: \n", can.available());
     //Serial.print("received ID:");
-    //Serial.println(receive.identifier);
+    Serial.printf("count: %d\n", count);
+    Serial.printf("tick: %d\n", tickHookCount);
+    //Serial.printf("deqcount: %d\n", deqcount);
+    //Serial.printf("receive: %d\nreceive Failed: %d\ncallback: %d\nreceiveDequeueFail: %d\n", receiveSuccessCount, receiveFailCount, callbackCount, receiveDequeueFail);
 }

@@ -31,9 +31,17 @@ PB8_PB9
 volatile uint32_t count=0;
 volatile bool isTaskRunning = false;
 volatile uint32_t txIrqCount = 0;
+volatile uint32_t receiveSuccessCount = 0;
+volatile uint32_t receiveFailCount = 0;
+
+volatile uint32_t receiveAvailableNonZero = 0;
+volatile uint32_t receiveDequeueSuccess = 0;
+volatile uint32_t receiveDequeueFail = 0;
+
+volatile uint32_t callbackCount = 0;
+volatile uint32_t deqcount = 0;
 
 //定数
-constexpr uint8_t STM32_AF7 = 0x07;
 constexpr uint8_t STM32_AF9 = 0x09;
 
 constexpr uint8_t CAN_TX_QUEUE_SIZE = 16;
@@ -54,16 +62,6 @@ struct twai_message_t{        //CAN_msg_tでは
     uint8_t data_length_code; //len
     uint8_t data[8];          //data[8]
 };
-
-#if false
-struct CAN_msg_t{
-  uint32_t id;        /* 29 bit identifier                      */
-  uint8_t  data[8];   /* Data field                             */
-  uint8_t  len;       /* Length of data field in bytes          */
-  uint8_t  format;    /* 0 - STANDARD, 1- EXTENDED IDENTIFIER   */
-  uint8_t  type;      /* 0 - DATA FRAME, 1 - REMOTE FRAME       */
-};
-#endif
 
 struct CAN_bit_timing_config_t{
   uint8_t TS2;
@@ -100,11 +98,14 @@ class RingBuffer {
 
     bool dequeue(T* item){
       noInterrupts();
-
+      
       if(count == 0){
-          interrupts();
-          return false;
+        //キューが空
+        interrupts();
+        return false;
       }
+
+      deqcount++;
 
       *item = buffer[tail];
       tail = (tail + 1) % SIZE;
@@ -143,17 +144,25 @@ class STM32CAN{
 
     bool send(const twai_message_t& msg){
       bool ok = txQueue.enqueue(msg);
-      Serial.printf(
-        "send: enqueue=%d available=%u\n",
-        ok,
-        txQueue.available()
-      );
+      /*Serial.printf("send: enqueue=%d available=%u\n", ok, txQueue.available());*/
       if(ok) processTxQueue();
       return ok;
     }
 
     bool receive(twai_message_t* msg){
-      return rxQueue.dequeue(msg);
+      if(rxQueue.available() > 0){
+        receiveAvailableNonZero++;
+      }
+
+      bool result = rxQueue.dequeue(msg);
+      if(result){
+          receiveDequeueSuccess++;
+      }else{
+          receiveDequeueFail++;
+      }
+      return result;
+
+      //return rxQueue.dequeue(msg);
     }
 
     uint8_t available(){
@@ -169,22 +178,14 @@ class STM32CAN{
 
     void CANReceiveHardware(twai_message_t* msg);
 
-    /*void handleRxInterrupt(){
-      while (CAN1->RF0R & 0x3UL){
-        twai_message_t msg;
-        CANReceiveHardware(&msg);
-        if(!rxQueue.enqueue(msg)){
-          // overflow
-        }
-      }
-    }*/
     void handleRxInterrupt(){
       while (CAN1->RF0R & 0x3UL){
         twai_message_t msg;
-
         CANReceiveHardware(&msg);
         if(rxQueue.enqueue(msg)){
-        } else {
+          //count = rxQueue.available();
+        }else {
+          
         }
       }
     }
@@ -244,12 +245,12 @@ inline void STM32CAN::processTxQueue(){
     while (true){
       // 空きMailbox無し→終了
       if (!(CAN1->TSR & (CAN_TSR_TME0 | CAN_TSR_TME1 | CAN_TSR_TME2))){
-        Serial.println("メールボックスが満杯です");
+        //Serial.println("メールボックスが満杯です");
         break;
       }
       // queueが空→終了
       if (!txQueue.dequeue(&msg)){
-        Serial.println("キュー内のすべてのメッセージを処理しました");
+        //Serial.println("キュー内のすべてのメッセージを処理しました");
         break;
       }
 
@@ -463,7 +464,7 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
 
 
   //受信タスクの追加
-  BaseType_t isTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 0, NULL);
+  BaseType_t isTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 1, NULL);
   Serial.println("xTaskCreate finished");
   
 
@@ -490,18 +491,18 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   //Time inperruptの有効化
   CAN1->IER |= CAN_IER_TMEIE;
 
-  Serial.printf("TX IER after enable = 0x%08lX\n", CAN1->IER);
+  //Serial.printf("TX IER after enable = 0x%08lX\n", CAN1->IER);
   
   // RX FIFO0 message pending interrupt
   CAN1->IER |= CAN_IER_FMPIE0;
 
-  Serial.printf("RX IER after enable = 0x%08lX\n", CAN1->IER);
+  //Serial.printf("RX IER after enable = 0x%08lX\n", CAN1->IER);
 
 
-  // TxのNVIC有効化
+  // TxのNVICによる割り込み有効化
   NVIC_EnableIRQ(USB_HP_CAN_TX_IRQn);
 
-  // RxのNVIC有効化
+  // RxのNVICによる割り込み有効化
   NVIC_EnableIRQ(USB_LP_CAN_RX0_IRQn);
 
   // Wait for normal mode
@@ -517,10 +518,8 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
     delay(1);
   }
 
-  
   #if defined(DEBUG)
   Serial.printf("can1: %d\n", (long)can1);
-
   Serial.printf("isTaskCreated: %d\n", (long)isTaskCreated);
   Serial.printf("isTaskRunning: %d\n", isTaskRunning);
   #endif
@@ -531,22 +530,27 @@ inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
   return true;
 }
 
-
 void STM32CAN::rxTask(void* param){
   isTaskRunning = true;
   Serial.println("rxTask START");
-  
   STM32CAN* self = static_cast<STM32CAN*>(param);
   twai_message_t msg;
-  
-  while(true){
-    if(self->receive(&msg)){
-      Serial.println("rxTask RECEIVE");
 
-      if (self->rxCallback) {
+  while(true){
+
+    count = xTaskGetTickCount();
+
+    //count = self->available();
+    if(self->receive(&msg)){
+      receiveSuccessCount++;
+      if(self->rxCallback){
+        callbackCount++;
         self->rxCallback(msg);
       }
+    }else{
+      receiveFailCount++;
     }
+    
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
@@ -662,6 +666,8 @@ inline bool STM32CAN::CANSendToFreeMailbox(twai_message_t* CAN_tx_msg){
 }
 
 
+//ISR割り込み定義ゾーン
+
 // TxのISR定義
 extern "C" void USB_HP_CAN_TX_IRQHandler(void){
   txIrqCount++;
@@ -686,3 +692,4 @@ extern "C" void USB_LP_CAN_RX0_IRQHandler(void){
     STM32CAN::instance->handleRxInterrupt();
   }
 }
+
