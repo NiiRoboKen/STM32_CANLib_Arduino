@@ -1,24 +1,50 @@
+
+/*
+参考プログラム
+https://github.com/nopnop2002/Arduino-STM32-CAN/blob/master/stm32f303/stm32f303.ino
+をclassにまとめました。
+
+多少いじくりました（引数の抽象化、非同期送信、class化）
+元のコメントは一部翻訳済み
+
+CANメッセージのビットレートに指定できる数値の一覧
+50000
+100000
+125000
+250000
+500000
+1000000
+
+CANのTx,Rxに使用するピンを設定します。
+上のほうにあるenum CANPinTypesによって、このようなピンを設定できます。
+PA11_PA12
+*/
+
 #pragma once
 
 #include <STM32FreeRTOS.h>
 #include <Arduino.h>
 
+#define DEBUG
+
+volatile uint32_t count=0;
+volatile bool isTaskRunning = false;
+volatile uint32_t txIrqCount = 0;
+volatile uint32_t receiveSuccessCount = 0;
+volatile uint32_t receiveFailCount = 0;
+
+volatile uint32_t receiveAvailableNonZero = 0;
+volatile uint32_t receiveDequeueSuccess = 0;
+volatile uint32_t receiveDequeueFail = 0;
+
+volatile uint32_t callbackCount = 0;
+volatile uint32_t deqcount = 0;
 
 //定数
 constexpr uint8_t STM32_AF9 = 0x09;
 
 constexpr uint8_t CAN_TX_QUEUE_SIZE = 16;
 constexpr uint8_t CAN_RX_QUEUE_SIZE = 16;
-
-#define STM32_CAN_TIR_TXRQ  (1U << 0U)  // Bit 0: Transmit Mailbox Request
-#define STM32_CAN_RIR_RTR   (1U << 1U)  // Bit 1: Remote Transmission Request
-#define STM32_CAN_RIR_IDE   (1U << 2U)  // Bit 2: Identifier Extension
-#define STM32_CAN_TIR_RTR   (1U << 1U)  // Bit 1: Remote Transmission Request
-#define STM32_CAN_TIR_IDE   (1U << 2U)  // Bit 2: Identifier Extension
-
-#define CAN_EXT_ID_MASK     0x1FFFFFFFU
-#define CAN_STD_ID_MASK     0x000007FFU
-
 
 /* CANメッセージのフォーマットを表す記号名 */
 enum CAN_FORMAT {STANDARD_FORMAT = 0, EXTENDED_FORMAT};
@@ -36,14 +62,70 @@ struct twai_message_t{        //CAN_msg_tでは
     uint8_t data[8];          //data[8]
 };
 
-//RXのメッセージを一時的に格納する
-twai_message_t RxMsg;
-
-
 struct CAN_bit_timing_config_t{
   uint8_t TS2;
   uint8_t TS1;
   uint8_t BRP;
+};
+
+
+//汎用リングバッファー化用
+template<typename T, uint8_t SIZE>
+class RingBuffer {
+  private:
+    T buffer[SIZE];
+    volatile uint8_t head = 0;
+    volatile uint8_t tail = 0;
+    volatile uint8_t count = 0;
+
+  public:
+    bool enqueue(const T& item){
+      noInterrupts();
+
+      if(count >= SIZE){
+          interrupts();
+          return false;
+      }
+
+      buffer[head] = item;
+      head = (head + 1) % SIZE;
+      count++;
+
+      interrupts();
+      return true;
+    }
+
+    bool dequeue(T* item){
+      noInterrupts();
+      
+      if(count == 0){
+        //キューが空
+        interrupts();
+        return false;
+      }
+
+      deqcount++;
+
+      *item = buffer[tail];
+      tail = (tail + 1) % SIZE;
+      count--;
+
+      interrupts();
+      return true;
+    }
+
+    uint8_t available(){
+      noInterrupts();
+      uint8_t c = count;
+      interrupts();
+      return c;
+    }
+
+    void clear(){
+      noInterrupts();
+      head = tail = count = 0;
+      interrupts();
+    }
 };
 
 
@@ -55,32 +137,40 @@ class STM32CAN{
       instance = this;
     }
 
-    bool begin(long bitrate, CANPinTypes SelectPin);
+    bool begin(long bitrate, CANPinTypes SelectPin){
+      return CANInit(bitrate, SelectPin);
+    }
 
     bool send(const twai_message_t& msg){
-      if (txQueue == nullptr) {
-        return false;
-      }
-      return xQueueSend(txQueue, &msg, 0) == pdPASS;
+      bool ok = txQueue.enqueue(msg);
+      /*Serial.printf("send: enqueue=%d available=%u\n", ok, txQueue.available());*/
+      if(ok) processTxQueue();
+      return ok;
     }
 
     bool receive(twai_message_t* msg){
-      return false;
+      if(rxQueue.available() > 0){
+        receiveAvailableNonZero++;
+      }
+
+      bool result = rxQueue.dequeue(msg);
+      if(result){
+          receiveDequeueSuccess++;
+      }else{
+          receiveDequeueFail++;
+      }
+      return result;
 
       //return rxQueue.dequeue(msg);
     }
 
     uint8_t available(){
-      return 0;
+      return rxQueue.available();
     }
 
     //コールバック
     void onReceive(void (*callback)(twai_message_t msg)){
       rxCallback = callback;
-    }
-
-    void onMainLoop(void (*callback)()){
-      loopCallBack = callback;
     }
 
     void processTxQueue();
@@ -91,17 +181,18 @@ class STM32CAN{
       while (CAN1->RF0R & 0x3UL){
         twai_message_t msg;
         CANReceiveHardware(&msg);
-        
+        if(rxQueue.enqueue(msg)){
+          //count = rxQueue.available();
+        }else {
+          
+        }
       }
     }
 
-    TaskHandle_t RxTaskHandle = NULL;
-    TaskHandle_t LoopTaskHandle = NULL;
-    TaskHandle_t TxTaskHandle = NULL;
-    
-    QueueHandle_t txQueue = nullptr;
-    
   private:
+    //コールバック関数のポインタ
+    void (*rxCallback)(twai_message_t msg) = nullptr;
+
     //内部関数を追加
     bool CANSendToFreeMailbox(twai_message_t* msg);
 
@@ -124,109 +215,50 @@ class STM32CAN{
 
     CAN_bit_timing_config_t ConvBaudrate(long baud);
 
-    bool CANinit(long bitrate, CANPinTypes selectPin);
+    bool CANInit(long bitrate, CANPinTypes selectPin);
 
-    //RingBuffer<twai_message_t, CAN_TX_QUEUE_SIZE> txQueue;
-    //RingBuffer<twai_message_t, CAN_RX_QUEUE_SIZE> rxQueue;
+    static void rxTask(void* param);
 
-    //受信コールバック関数のポインタ
-    void (*rxCallback)(twai_message_t msg) = nullptr;
-    //メインループのコールバック関数のポインタ
-    void (*loopCallBack)() = nullptr;
+    RingBuffer<twai_message_t, CAN_TX_QUEUE_SIZE> txQueue;
+    RingBuffer<twai_message_t, CAN_RX_QUEUE_SIZE> rxQueue;
+    volatile bool txBusy = false;
 
-
-    static void rxTask(void* param){
-      //このタスクは割り込みから実行通知を受けさせる
-      STM32CAN* self = static_cast<STM32CAN*>(param);
-      twai_message_t msg;
-      Serial.println("RXTASK WAKE");
-      while(true){
-        //CANのRx割り込みISRから実行通知が来るまでブロック
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-        Serial.println("Rx割り込みからタスクに実行通知が送られました");
-
-        while (CAN1->RF0R & 0x3UL) {
-          self->CANReceiveHardware(&msg);
-          if (self->rxCallback) {
-            self->rxCallback(msg);
-          }
-        }
-
-        // FIFOを処理し終わったのでRX IRQを再有効化
-        CAN1->IER |= CAN_IER_FMPIE0;
-
-      }
-    }
-
-    static void txTask(void* param){
-      STM32CAN* self = static_cast<STM32CAN*>(param);
-      twai_message_t msg;
-      Serial.println("TXTASK WAKE");
-      while (true) {
-        // TX Queueにメッセージが入るまで待つ
-        if (xQueueReceive(self->txQueue, &msg, portMAX_DELAY) == pdPASS){
-          Serial.println("TX Queueからメッセージを取得");
-          while (!self->CANSendToFreeMailbox(&msg)) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-          }
-          Serial.println("CAN mailboxへ投入");
-        }
-      }
-    }
-
-    static void mainLoop(void* param){
-      STM32CAN* self = static_cast<STM32CAN*>(param);
-      Serial.println("MAINLOOP WAKE");
-      while(true){
-        if(self->loopCallBack){
-          self->loopCallBack();
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-      }
-    };
 };
 
 inline STM32CAN* STM32CAN::instance = nullptr;
 
 
 
-bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
-  if (!CANinit(bitrate, SelectPin)) {
-    Serial.println("CAN初期化失敗");
-    return false;
-  }
-  Serial.println("CAN初期化完了");
+//キューにあるものをMailboxへ送信
+inline void STM32CAN::processTxQueue(){
+    noInterrupts();
 
-  //キューの初期化
-  txQueue = xQueueCreate(CAN_TX_QUEUE_SIZE, sizeof(twai_message_t));
+    if (txBusy) {
+        interrupts();
+        return;
+    }
 
-  if (txQueue == nullptr) {
-    Serial.println("TX Queueの作成に失敗");
-    return false;
-  }
+    txBusy = true;
+    interrupts();
+    twai_message_t msg;
+    while (true){
+      // 空きMailbox無し→終了
+      if (!(CAN1->TSR & (CAN_TSR_TME0 | CAN_TSR_TME1 | CAN_TSR_TME2))){
+        //Serial.println("メールボックスが満杯です");
+        break;
+      }
+      // queueが空→終了
+      if (!txQueue.dequeue(&msg)){
+        //Serial.println("キュー内のすべてのメッセージを処理しました");
+        break;
+      }
 
-  BaseType_t isMainLoopTaskCreated, isRxTaskCreated, isTxTaskCreated;
+      CANSendToFreeMailbox(&msg);
+    }
 
-  isMainLoopTaskCreated = xTaskCreate(mainLoop, "Main_Loop", 512, this, 1, &LoopTaskHandle);
-  Serial.print("メインループのタスクを作成しました: ");
-  Serial.println(isMainLoopTaskCreated);
-  isRxTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 2, &RxTaskHandle);
-  Serial.print("受信タスクを作成しました: ");
-  Serial.println(isRxTaskCreated);
-  isTxTaskCreated = xTaskCreate(txTask, "CAN_TX_Task", 512, this, 2, &TxTaskHandle);
-  Serial.print("送信タスクを作成しました: ");
-  Serial.println(isTxTaskCreated);
-
-  if(isMainLoopTaskCreated!=pdPASS || isRxTaskCreated!=pdPASS || isTxTaskCreated!=pdPASS){
-    Serial.println("タスクの作成に失敗しました。");
-    //return false;
-  }
-
-  
-  vTaskStartScheduler();
-  
-  return true;
+    noInterrupts();
+    txBusy = false;
+    interrupts();
 }
 
 
@@ -280,8 +312,8 @@ inline void STM32CAN::CANSetGpio(GPIO_TypeDef * addr, uint8_t index, uint8_t afr
 
 
 /**
- * CANフィルタのレジスタを初期化します。
- * 
+ * Initializes the CAN filter registers.
+ *
  * The bxCAN provides up to 14 scalable/configurable identifier filter banks, for selecting the incoming messages, that the software needs and discarding the others.
  *
  * @preconditions   - This register can be written only when the filter initialization mode is set (FINIT=1) in the CAN_FMR register.
@@ -354,12 +386,33 @@ inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
       return {2, 13, 45};
   }
 }
+    
+/**
+ * CANコントローラーの初期化及びピン設定
+ *
+ * @params: bitrate
+ *   ビットレートに指定できる数値の一覧
+ *   50000
+ *   100000
+ *   125000
+ *   250000
+ *   500000
+ *   1000000
+ * @params: SelectPin
+ *   CANのTx,Rxに使用するピンを設定します。
+ *   上のほうにあるenum CANPinTypesによって、このようなピンを設定できます。
+ *   PA11_PA12,
+ *   PB8_PB9
+ * 
+ */
+inline bool STM32CAN::CANInit(long bitrate, CANPinTypes SelectPin){
+  // リファレンスマニュアル
+  // https://www.st.com/content/ccc/resource/technical/document/reference_manual/4a/19/6e/18/9d/92/43/32/DM00043574.pdf/files/DM00043574.pdf/jcr:content/translations/en.DM00043574.pdf
 
-
-bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
+  //RCC->APB1ENR |= 0x2000000UL;          // CANクロックの有効化
   RCC->APB1ENR |= RCC_APB1ENR_CANEN;
 
-  switch(selectPin){
+  switch(SelectPin){
     case PA12_PA11:
       RCC->AHBENR |= 0x20000UL;           // GPIOAクロックの有効化
       CANSetGpio(GPIOA, 11, STM32_AF9);         // STM32_AF9にPA11を設定
@@ -390,16 +443,37 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   CAN1->BTR &= ~(((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF)); 
   CAN1->BTR |= (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF);
 
+  #if defined(DEBUG)
   Serial.println("ループバックを有効化します");
   CAN1->BTR |= CAN_BTR_LBKM;
+  /*
+  uint32_t btr = CAN1->BTR;
+
+  uint32_t brp = (btr & 0x3FF) + 1;
+  uint32_t ts1 = ((btr >> 16) & 0x0F) + 1;
+  uint32_t ts2 = ((btr >> 20) & 0x07) + 1;
+  uint32_t sjw = ((btr >> 24) & 0x03) + 1;
   
+  Serial.printf("BRP = %lu\n", brp);
+  Serial.printf("TS1 = %lu\n", ts1);
+  Serial.printf("TS2 = %lu\n", ts2);
+  Serial.printf("SJW = %lu\n", sjw);
+  */
+  #endif
+
+
+  //受信タスクの追加
+  BaseType_t isTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 1, NULL);
+  Serial.println("xTaskCreate finished");
+  
+
   //書き込みを終了する
   CAN1->MCR &= ~CAN_MCR_INRQ;
 
-  // フィルターの設定
+  // フィルターをデフォルトの値に設定
   CAN1->FMR |=   0x1UL; // フィルターを初期化状態にする
 
-  // フィルター0を初期化
+  // Set fileter 0
   // Single 32-bit scale configuration 
   // Two 32-bit registers of filter bank x are in Identifier Mask mode
   // Filter assigned to FIFO 0 
@@ -407,13 +481,14 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   CANSetFilter(0, 1, 0, 0, 0x0UL, 0x0UL); 
 
   CAN1->FMR &= ~(0x1UL);                // Deactivate initialization mode
+
   bool can1 = false;
   CAN1->MCR &= ~(0x1UL);                // Require CAN1 to normal mode 
 
   //割り込み有効化
 
   //Time inperruptの有効化
-  //CAN1->IER |= CAN_IER_TMEIE;
+  CAN1->IER |= CAN_IER_TMEIE;
 
   //Serial.printf("TX IER after enable = 0x%08lX\n", CAN1->IER);
   
@@ -422,12 +497,13 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
 
   //Serial.printf("RX IER after enable = 0x%08lX\n", CAN1->IER);
 
+
   // TxのNVICによる割り込み有効化
-  //NVIC_EnableIRQ(USB_HP_CAN_TX_IRQn);
+  NVIC_EnableIRQ(USB_HP_CAN_TX_IRQn);
 
   // RxのNVICによる割り込み有効化
-  NVIC_SetPriority(USB_LP_CAN_RX0_IRQn, 5);
   NVIC_EnableIRQ(USB_LP_CAN_RX0_IRQn);
+
   // Wait for normal mode
   // If the connection is not correct, it will not return to normal mode.
   uint16_t TimeoutMilliseconds = 1000;
@@ -441,9 +517,49 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
     delay(1);
   }
 
-  return !!can1;
+  #if defined(DEBUG)
+  Serial.printf("can1: %d\n", (long)can1);
+  Serial.printf("isTaskCreated: %d\n", (long)isTaskCreated);
+  Serial.printf("isTaskRunning: %d\n", isTaskRunning);
+  #endif
+
+  vTaskStartScheduler();
+
+  if(!can1 || isTaskCreated!=pdPASS) return false;
+  return true;
 }
 
+void STM32CAN::rxTask(void* param){
+  isTaskRunning = true;
+  Serial.println("rxTask START");
+  STM32CAN* self = static_cast<STM32CAN*>(param);
+  twai_message_t msg;
+
+  while(true){
+    //count = self->available();
+    if(self->receive(&msg)){
+      receiveSuccessCount++;
+      if(self->rxCallback){
+        callbackCount++;
+        self->rxCallback(msg);
+      }
+    }else{
+      receiveFailCount++;
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+
+
+#define STM32_CAN_TIR_TXRQ  (1U << 0U)  // Bit 0: Transmit Mailbox Request
+#define STM32_CAN_RIR_RTR   (1U << 1U)  // Bit 1: Remote Transmission Request
+#define STM32_CAN_RIR_IDE   (1U << 2U)  // Bit 2: Identifier Extension
+#define STM32_CAN_TIR_RTR   (1U << 1U)  // Bit 1: Remote Transmission Request
+#define STM32_CAN_TIR_IDE   (1U << 2U)  // Bit 2: Identifier Extension
+
+#define CAN_EXT_ID_MASK     0x1FFFFFFFU
+#define CAN_STD_ID_MASK     0x000007FFU
 
 /**
  * ハードウェアFIFOから読み出す関数
@@ -486,7 +602,6 @@ inline void STM32CAN::CANReceiveHardware(twai_message_t* CAN_rx_msg){
   // Make the next incoming message available.
   CAN1->RF0R |= 0x20UL;
 }
-
 
 //空きMainboxにデータを送る
 inline bool STM32CAN::CANSendToFreeMailbox(twai_message_t* CAN_tx_msg){
@@ -547,15 +662,30 @@ inline bool STM32CAN::CANSendToFreeMailbox(twai_message_t* CAN_tx_msg){
 }
 
 
-extern "C" void USB_LP_CAN_RX0_IRQHandler(){
-  BaseType_t higherPriorityTaskWoken = pdFALSE;
-  CAN1->IER &= ~CAN_IER_FMPIE0; //割り込みの連鎖が起きるのを防ぐために一旦無効化
-  // RX Taskに通知
-  if(STM32CAN::instance->RxTaskHandle){
-    vTaskNotifyGiveFromISR(
-      STM32CAN::instance->RxTaskHandle,
-      &higherPriorityTaskWoken
-    );
+//ISR割り込み定義ゾーン
+
+// TxのISR定義
+extern "C" void USB_HP_CAN_TX_IRQHandler(void){
+  txIrqCount++;
+
+  // Mailbox0
+  if (CAN1->TSR & CAN_TSR_RQCP0) CAN1->TSR |= CAN_TSR_RQCP0;
+  // Mailbox1
+  if (CAN1->TSR & CAN_TSR_RQCP1) CAN1->TSR |= CAN_TSR_RQCP1;
+  // Mailbox2
+  if (CAN1->TSR & CAN_TSR_RQCP2) CAN1->TSR |= CAN_TSR_RQCP2;
+
+  // 次のキューを送信
+  if(STM32CAN::instance){
+    STM32CAN::instance->processTxQueue();
   }
-  portYIELD_FROM_ISR(higherPriorityTaskWoken);
+  //processTxQueue();
 }
+
+// RxのISR定義
+extern "C" void USB_LP_CAN_RX0_IRQHandler(void){
+  if(STM32CAN::instance){
+    STM32CAN::instance->handleRxInterrupt();
+  }
+}
+

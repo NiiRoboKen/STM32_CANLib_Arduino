@@ -1,14 +1,13 @@
 # STM32_CANLib_Arduino
 STM32 F303K8, F446RE 用のArduinoフレームワークCANライブラリ（F303とF446間での動作確認中）
 
----
 未完成・改造中<br>
 なるべくesp-canに似た操作感になるように頑張ります!
 
 ## 使い方
 
-### 例文
-```
+### 例文(完成予定の構文)
+```cpp
 #include <Arduino.h>
 #include "STM32_CAN.hpp"
 
@@ -40,9 +39,13 @@ void loop() {
 
 ---
 ## 注意点
-beginに渡すピンの設定
+beginに渡すピンの設定 enum CanPinTypes
 <br>
-f303: PA12_PA11 (tx/rx, CAN1)<br>
-f446: PA12_PA11 (tx/rx, CAN1)<br>
-      PB13_PB12 (tx/rx, CAN2)<br>
-ESP32の方と同じ変数名にするために、twai_message_tとしています。
+|STM32|CAN1,2|PIN(tx_rx)|
+|--|--|--|
+|f303|CAN1|PA12_PA11|
+|  |  |  |
+|f446|CAN1|PA12_PA11|
+|  |CAN2|PB13_PB12|
+
+ESP32の方と同ように扱えるようにするために、twai_message_tとしています。中の変数名も揃えています。（一部未使用の変数は削除してあります）

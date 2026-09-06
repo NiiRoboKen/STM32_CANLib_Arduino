@@ -7,6 +7,7 @@
 constexpr uint8_t STM32_AF7 = 0x07;
 constexpr uint8_t STM32_AF9 = 0x09;
 
+//最大が28でcan1とcan2で共用するため最大サイズを14まで削る
 constexpr uint8_t CAN_TX_QUEUE_SIZE = 14;
 constexpr uint8_t CAN_RX_QUEUE_SIZE = 14;
 
