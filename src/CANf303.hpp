@@ -3,6 +3,10 @@
 #include <STM32FreeRTOS.h>
 #include <Arduino.h>
 
+#if defined(STM32F3xx)
+
+//ループバックの有効化
+//#define LOOPBACK
 
 //定数
 constexpr uint8_t STM32_AF9 = 0x09;
@@ -64,16 +68,6 @@ class STM32CAN{
       return xQueueSend(txQueue, &msg, 0) == pdPASS;
     }
 
-    bool receive(twai_message_t* msg){
-      return false;
-
-      //return rxQueue.dequeue(msg);
-    }
-
-    uint8_t available(){
-      return 0;
-    }
-
     //コールバック
     void onReceive(void (*callback)(twai_message_t msg)){
       rxCallback = callback;
@@ -83,9 +77,6 @@ class STM32CAN{
       loopCallBack = callback;
     }
 
-    void processTxQueue();
-
-    void CANReceiveHardware(twai_message_t* msg);
 
     void handleRxInterrupt(){
       while (CAN1->RF0R & 0x3UL){
@@ -105,6 +96,7 @@ class STM32CAN{
     //内部関数を追加
     bool CANSendToFreeMailbox(twai_message_t* msg);
 
+    void CANReceiveHardware(twai_message_t* msg);
 
     void CANSetGpio(
       GPIO_TypeDef* addr,
@@ -126,8 +118,6 @@ class STM32CAN{
 
     bool CANinit(long bitrate, CANPinTypes selectPin);
 
-    //RingBuffer<twai_message_t, CAN_TX_QUEUE_SIZE> txQueue;
-    //RingBuffer<twai_message_t, CAN_RX_QUEUE_SIZE> rxQueue;
 
     //受信コールバック関数のポインタ
     void (*rxCallback)(twai_message_t msg) = nullptr;
@@ -184,7 +174,7 @@ class STM32CAN{
         }
         vTaskDelay(pdMS_TO_TICKS(100));
       }
-    };
+    }
 };
 
 inline STM32CAN* STM32CAN::instance = nullptr;
@@ -206,6 +196,7 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
     return false;
   }
 
+  //タスクを作成
   BaseType_t isMainLoopTaskCreated, isRxTaskCreated, isTxTaskCreated;
 
   isMainLoopTaskCreated = xTaskCreate(mainLoop, "Main_Loop", 512, this, 1, &LoopTaskHandle);
@@ -223,7 +214,6 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
     //return false;
   }
 
-  
   vTaskStartScheduler();
   
   return true;
@@ -336,6 +326,7 @@ struct CAN_bit_timing_config_t{
 };
 */
 
+//要調整
 inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
   switch(baud){
     case (long)50E3:
@@ -390,8 +381,10 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   CAN1->BTR &= ~(((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF)); 
   CAN1->BTR |= (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF);
 
+  #if defined(LOOPBACK)
   Serial.println("ループバックを有効化します");
   CAN1->BTR |= CAN_BTR_LBKM;
+  #endif
   
   //書き込みを終了する
   CAN1->MCR &= ~CAN_MCR_INRQ;
@@ -559,3 +552,5 @@ extern "C" void USB_LP_CAN_RX0_IRQHandler(){
   }
   portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
+
+#endif

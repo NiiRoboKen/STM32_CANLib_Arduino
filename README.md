@@ -63,6 +63,7 @@ void setup(){
   can.onMainLoop(&mainLoop);
   can.begin(1000000, PA12_PA11);
 }
+
 //標準ループが使用不可?
 void loop(){}
 ```
@@ -79,3 +80,5 @@ beginに渡すピンの設定 enum CanPinTypes
 |  |CAN2|PB13_PB12|
 
 ESP32の方と同ように扱えるようにするために、twai_message_tとしています。中の変数名も揃えています。（一部未使用の変数は削除してあります）
+
+freeRTOSを積む意味はあったのだろうか...?
