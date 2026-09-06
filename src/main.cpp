@@ -6,7 +6,19 @@
 STM32CAN can;
 
 void RxCallBack(twai_message_t msg){
+  //10進数表示
+  Serial.println(msg.identifier); //291
+  //16進数表示
+  Serial.println(msg.identifier, HEX); //123
   
+  Serial.println(msg.data[0]); //0
+  Serial.println(msg.data[1]); //1
+  Serial.println(msg.data[2]); //2
+  Serial.println(msg.data[3]); //3
+  Serial.println(msg.data[4]); //4
+  Serial.println(msg.data[5]); //5
+  Serial.println(msg.data[6]); //6
+  Serial.println(msg.data[7]); //7
 }
 
 volatile bool a = false;
