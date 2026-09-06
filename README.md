@@ -14,12 +14,10 @@ STM32 F303K8, F446RE 用のArduinoフレームワークCANライブラリ（F303
 
 ### 例文(完成予定の構文)
 ```cpp
-//stty -F /dev/ttyACM0 115200 raw -echo && cat /dev/ttyACM0
-
 #include <Arduino.h>
-#include "CANf303.hpp"
+#include "STM32_CAN.hpp"
 
-STM32CAN can;
+CanDriver can;
 
 void RxCallBack(twai_message_t msg){
   //10進数表示
@@ -65,7 +63,6 @@ void setup(){
   can.onMainLoop(&mainLoop);
   can.begin(1000000, PA12_PA11);
 }
-
 //標準ループが使用不可?
 void loop(){}
 ```
