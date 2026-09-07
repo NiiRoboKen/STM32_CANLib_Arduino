@@ -57,8 +57,8 @@ void setup(){
   Serial.begin(115200);
   can.onReceive(&RxCallBack);
   can.onMainLoop(&mainLoop);
-  //can.begin(1000000, PA12_PA11);
-  can.begin(1000000, PB13_PB12);
+  can.begin(1000000, PA12_PA11);
+  //can.begin(1000000, PB13_PB12);
 }
 
 void loop(){}
