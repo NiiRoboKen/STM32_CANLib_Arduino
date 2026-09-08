@@ -40,7 +40,7 @@ struct twai_message_t{        //CAN_msg_tでは
 struct CAN_bit_timing_config_t{
   uint8_t TS2;
   uint8_t TS1;
-  uint8_t BRP;
+  uint16_t BRP;
 };
 
 
@@ -301,27 +301,38 @@ inline void STM32CAN::CANSetFilter(uint8_t index, uint8_t scale, uint8_t mode, u
 struct CAN_bit_timing_config_t{
   uint8_t TS2;
   uint8_t TS1;
-  uint8_t BRP;
+  uint16_t BRP;
 };
+
+BRP 1~1024
+TS1 0~15
+TS2 0~7
+
+CAN bitrate = PCLK1 / (BRP × (1 + TS1 + TS2))
+       1MHz = 45MHz / (3*(1+12+2))
+     0.5MHz = 45MHz / (6*(1+12+2))
+    0.25MHz = 45MHz / (12*(1+12+2))
+    0.125MHz = 45MHz / (36*(1+7+2))
+     0.1MHz = 45MHz / (30*(1+12+2))
+    0.05MHz = 45MHz / (60*(1+12+2))
 */
 
-//要調整
 inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
   switch(baud){
     case (long)50E3:
-      return {2, 13, 45};
+      return {2, 12, 60};
     case (long)100E3:
-      return {2, 15, 20};
+      return {2, 12, 30};
     case (long)125E3:
-      return {2, 13, 18};
+      return {2, 7, 36};
     case (long)250E3:
-      return {2, 13, 9};
+      return {2, 12, 12};
     case (long)500E3:
-      return {2, 15, 4};
+      return {2, 12, 6};
     case (long)1000E3:
-      return {2, 13, 2};
+      return {2, 12, 3};
     default:
-      return {2, 13, 45};
+      return {2, 12, 3};
   }
 }
 
@@ -335,31 +346,68 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
 
   switch(selectPin){
     case PA12_PA11:
-      RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+      SET_BIT(RCC->AHB1ENR, RCC_AHB1ENR_GPIOAEN);
       CANSetGpio(GPIOA, 12, STM32_AF9);
       CANSetGpio(GPIOA, 11, STM32_AF9);
+      //割り込み有効化
+
+      // RX FIFO0 message pending interrupt
+      SET_BIT(CAN1->IER, CAN_IER_FMPIE0);
+
+      // RxのNVICによる割り込み有効化
+      NVIC_SetPriority(CAN1_RX0_IRQn, 5);
+      NVIC_EnableIRQ(CAN1_RX0_IRQn);
       break;
-      
-      case PB13_PB12:
-      RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+    case PB13_PB12:
+      SET_BIT(RCC->AHB1ENR, RCC_AHB1ENR_GPIOBEN);
       CANSetGpio(GPIOB, 13, STM32_AF9);
       CANSetGpio(GPIOB, 12, STM32_AF9);
+
+      //割り込み有効化
+
+      // RX FIFO0 message pending interrupt
+      CAN2->IER |= CAN_IER_FMPIE0;
+
+      // RxのNVICによる割り込み有効化
+      NVIC_SetPriority(CAN2_RX0_IRQn, 5);
+      NVIC_EnableIRQ(CAN2_RX0_IRQn);
       break;
     default:
       return false;
       //例外値は無視
   }
 
+  // フィルターの設定
+  
+  /*
+    現段階ではフィルター0をCAN1、フィルター1をCAN2に割り当てています。
+    デフォルト設定ではすべてのIDのメッセージを受信します。
+    あとフィルターバンクはあと26個拡張できます。(446のフィルターバンクは全部で28個のため)
+  */
+  SET_BIT(CAN1->FMR, CAN_FMR_FINIT); //フィルター設定開始
+  if (useCan2) {
+    // CAN2 → Bank1
+    // Bank 2~27→ 未使用
 
+    CLEAR_BIT(CAN1->FMR, (0x3FUL << 8));
+    SET_BIT(CAN1->FMR, (1UL << 8));
+    CANSetFilter(1, 1, 0, 0, 0x0UL, 0x0UL);
+  } else {
+    // CAN1 → Bank 0
+    CANSetFilter(0, 1, 0, 0, 0x0UL, 0x0UL);
+  }
+  CLEAR_BIT(CAN1->FMR, CAN_FMR_FINIT); //フィルター設定終了
+
+  //ビットレート、割り込みの設定
   if(!useCan2){
     //CAN1
+    
 
-    //今回の環境ではスリープ解除は不要
+    //スリープ解除
     CLEAR_BIT(CAN1->MCR, CAN_MCR_SLEEP); 
-    //while ((CAN1->MSR & CAN_MSR_SLAK) != 0); // SLEEPから起動するまでまつ
-
-    SET_BIT(CAN1->MCR, CAN_MCR_INRQ); // CANを初期化状態にする
-    while (!(CAN1->MSR & CAN_MSR_INAK)); // 初期化状態になるのを待つ
+    //while ((CAN1->MSR & CAN_MSR_SLAK) != 0); //SLEEPから起動するまで待つ
+    SET_BIT(CAN1->MCR, CAN_MCR_INRQ); //CANを初期化状態にする
+    while (!(CAN1->MSR & CAN_MSR_INAK)); //初期化状態になるのを待つ
     
     SET_BIT(CAN1->MCR, CAN_MCR_ABOM); //自動バスオフ管理を有効にする
     
@@ -372,21 +420,45 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
     Serial.println("ループバックを有効化します");
     SET_BIT(CAN1->BTR, CAN_BTR_LBKM);
   
-    CLEAR_BIT(CAN1->MCR, CAN_MCR_INRQ); //書き込みを終了する
+    Serial.print("BTR = 0x");
+    Serial.println(CAN1->BTR, HEX);
 
-    /*
-    Serial.print("CAN1 MCR = 0x");
+    Serial.print("LBKM = ");
+    Serial.println((CAN1->BTR & CAN_BTR_LBKM) ? 1 : 0);
+
+    Serial.print("MCR = 0x");
     Serial.println(CAN1->MCR, HEX);
 
-    Serial.print("CAN1 MSR = 0x");
+    Serial.print("Before MSR = 0x");
     Serial.println(CAN1->MSR, HEX);
 
-    Serial.print("CAN1 BTR = 0x");
-    Serial.println(CAN1->BTR, HEX);
-    */
+
+    CLEAR_BIT(CAN1->MCR, CAN_MCR_INRQ); //書き込みを終了する
+
+
+    Serial.print("After MSR = 0x");
+    Serial.println(CAN1->MSR, HEX);
+
+    Serial.print("INRQ = ");
+    Serial.println((CAN1->MCR & CAN_MCR_INRQ) ? 1 : 0);
+
+    Serial.print("SLEEP = ");
+    Serial.println((CAN1->MCR & CAN_MCR_SLEEP) ? 1 : 0);
+
+    Serial.print("INAK = ");
+    Serial.println((CAN1->MSR & CAN_MSR_INAK) ? 1 : 0);
+
+    // Wait for normal mode
+    int timelimit = 0;
+    while (CAN1->MSR & CAN_MSR_INAK) {
+      delay(1);
+      if (++timelimit > 1000) return false;
+    }
+
+    return true;
   }else if(useCan2){
     //CAN2
-
+    CLEAR_BIT(CAN2->MCR, CAN_MCR_SLEEP); 
     SET_BIT(CAN2->MCR, CAN_MCR_INRQ); // CANを初期化状態にする
     while (!(CAN2->MSR & CAN_MSR_INAK)); // 初期化状態になるのを待つ
 
@@ -403,102 +475,9 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   
     CLEAR_BIT(CAN2->MCR, CAN_MCR_INRQ); //書き込みを終了する
 
-    /*
-    Serial.print("CAN2 MCR = 0x");
-    Serial.println(CAN2->MCR, HEX);
-
-    Serial.print("CAN2 MSR = 0x");
-    Serial.println(CAN2->MSR, HEX);
-
-    Serial.print("CAN2 BTR = 0x");
-    Serial.println(CAN2->BTR, HEX);
-    */
-  }
-
-
-  // フィルターの設定
-  
-  /*
-    現段階ではフィルター0をCAN1、フィルター1をCAN2に割り当てています。
-    デフォルト設定ではすべてのIDのメッセージを受信します。
-    あとフィルターバンクはあと26個拡張できます。(446のフィルターバンクは全部で28個のため)
-  */
-  SET_BIT(CAN1->FMR, CAN_FMR_FINIT); //フィルター設定開始
-  if (useCan2) {
-    // Bank 0 → CAN1
-    // Bank 1 → CAN2
-    // Bank 2~27→ 未使用
-
-    CLEAR_BIT(CAN1->FMR, (0x3FUL << 8));
-    SET_BIT(CAN1->FMR, (1UL << 8));
-    CANSetFilter(1, 1, 0, 0, 0x0UL, 0x0UL);
-  } else {
-    // CAN1 → Bank 0
-    CANSetFilter(0, 1, 0, 0, 0x0UL, 0x0UL);
-  }
-  CLEAR_BIT(CAN1->FMR, CAN_FMR_FINIT); //フィルター設定終了
-  
-  if(!useCan2){
-    CLEAR_BIT(CAN1->MCR, 0x1UL); // Require CAN1 to normal mode 
-
-    //割り込み有効化
-
-    // RX FIFO0 message pending interrupt
-    SET_BIT(CAN1->IER, CAN_IER_FMPIE0);
-
-    // RxのNVICによる割り込み有効化
-    NVIC_SetPriority(CAN1_RX0_IRQn, 5);
-    NVIC_EnableIRQ(CAN1_RX0_IRQn);
-
-    CLEAR_BIT(CAN1->MCR, CAN_MCR_INRQ);
-    delay(100);
-    Serial.print("MCR = 0x");
-Serial.println(CAN1->MCR, HEX);
-
-Serial.print("MSR = 0x");
-Serial.println(CAN1->MSR, HEX);
-
-Serial.print("INRQ = ");
-Serial.println((CAN1->MCR & CAN_MCR_INRQ) ? 1 : 0);
-
-Serial.print("SLEEP = ");
-Serial.println((CAN1->MCR & CAN_MCR_SLEEP) ? 1 : 0);
-
-Serial.print("INAK = ");
-Serial.println((CAN1->MSR & CAN_MSR_INAK) ? 1 : 0);
-
-Serial.print("SLAK = ");
-Serial.println((CAN1->MSR & CAN_MSR_SLAK) ? 1 : 0);
-
-Serial.print("WKUI = ");
-Serial.println((CAN1->MSR & CAN_MSR_WKUI) ? 1 : 0);
-
     // Wait for normal mode
     int timelimit = 0;
-    while (CAN1->MSR & CAN_MSR_INAK) {
-    delay(1);
-    if (++timelimit > 1000) return false;
-}
-
-    return true;
-
-  }else {
-    CLEAR_BIT(CAN2->MCR, 0x1UL); // Require CAN2 to normal mode 
-
-    //割り込み有効化
-
-    // RX FIFO0 message pending interrupt
-    CAN2->IER |= CAN_IER_FMPIE0;
-
-    // RxのNVICによる割り込み有効化
-    NVIC_SetPriority(CAN2_RX0_IRQn, 5);
-    NVIC_EnableIRQ(CAN2_RX0_IRQn);
-
-    CLEAR_BIT(CAN2->MCR, CAN_MCR_INRQ);
-
-    // Wait for normal mode
-    int timelimit = 0;
-    while(!(CAN2->MSR & CAN_MSR_INAK)){
+    while(CAN2->MSR & CAN_MSR_INAK){
       delay(1);
       timelimit++;
       if(timelimit>1000) return false;

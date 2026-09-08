@@ -49,8 +49,6 @@ void mainLoop(){
 CAN1 MCR = 0x40
 CAN1 MSR = 0x9
 CAN1 BTR = 0x401C0001
-
-
 */
 
 void setup(){

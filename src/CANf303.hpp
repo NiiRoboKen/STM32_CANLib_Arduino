@@ -47,7 +47,7 @@ twai_message_t RxMsg;
 struct CAN_bit_timing_config_t{
   uint8_t TS2;
   uint8_t TS1;
-  uint8_t BRP;
+  uint16_t BRP;
 };
 
 
@@ -324,25 +324,41 @@ struct CAN_bit_timing_config_t{
   uint8_t TS1;
   uint8_t BRP;
 };
+
+Serial.print("APB1 clock = ");
+Serial.println(HAL_RCC_GetPCLK1Freq());
+
+PCLK1 = 32MHz
+BRP 1~1024
+TS1 0~15
+TS2 0~7
+
+CAN bitrate = PCLK1 / (BRP × (1 + TS1 + TS2))
+       1MHz = 32MHz / (2*(1+12+3))
+     0.5MHz = 32MHz / (4*(1+12+3))
+    0.25MHz = 32MHz / (8*(1+12+3))
+   0.125MHz = 32MHz / (16*(1+12+3))
+     0.1MHz = 32MHz / (20*(1+12+3))
+    0.05MHz = 32MHz / (40*(1+12+3))
 */
 
 //要調整
 inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
   switch(baud){
     case (long)50E3:
-      return {2, 13, 45};
+      return {3, 12, 40};
     case (long)100E3:
-      return {2, 15, 20};
+      return {3, 12, 20};
     case (long)125E3:
-      return {2, 13, 18};
+      return {3, 12, 16};
     case (long)250E3:
-      return {2, 13, 9};
+      return {3, 12, 8};
     case (long)500E3:
-      return {2, 15, 4};
+      return {3, 12, 4};
     case (long)1000E3:
-      return {2, 13, 2};//return {2, 15, 2};
+      return {3, 12, 2};
     default:
-      return {2, 13, 45};
+      return {3, 12, 2};
   }
 }
 
@@ -350,6 +366,8 @@ inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
 bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   RCC->APB1ENR |= RCC_APB1ENR_CANEN;
 
+  //Serial.print("APB1 clock = ");
+  //Serial.println(HAL_RCC_GetPCLK1Freq());
   switch(selectPin){
     case PA12_PA11:
       RCC->AHBENR |= 0x20000UL;           // GPIOAクロックの有効化
