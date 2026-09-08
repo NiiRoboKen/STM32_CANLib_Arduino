@@ -43,48 +43,16 @@ void mainLoop(){
 
     Serial.println(can1.send(msg));
 
+    Serial.print("ESR = 0x");
+    Serial.println(CAN1->ESR, HEX);
+
+    Serial.print("TSR = 0x");
+    Serial.println(CAN1->TSR, HEX);
+
     a=true;
   }
 }
 
-void RxCallBack2(twai_message_t msg){
-  Serial.println("CAN2の結果");
-  //10進数表示
-  Serial.println(msg.identifier); //291
-  //16進数表示
-  Serial.println(msg.identifier, HEX); //123
-
-  Serial.println(msg.data[0]); //0
-  Serial.println(msg.data[1]); //1
-  Serial.println(msg.data[2]); //2
-  Serial.println(msg.data[3]); //3
-  Serial.println(msg.data[4]); //4
-  Serial.println(msg.data[5]); //5
-  Serial.println(msg.data[6]); //6
-  Serial.println(msg.data[7]); //7
-}
-
-volatile bool b = false;
-void mainLoop2(){
-  if(!b){
-    Serial.println("mainloop call!");
-
-    twai_message_t msg{};
-
-    msg.extd = STANDARD_FORMAT;
-    msg.rtr = DATA_FRAME;
-    msg.identifier = 0x123;
-    msg.data_length_code = 8;
-
-    for (int i = 0; i < 8; i++) {
-      msg.data[i] = i;
-    }
-
-    Serial.println(can2.send(msg));
-
-    b=true;
-  }
-}
 
 /*
 CAN1 MCR = 0x40
@@ -97,10 +65,6 @@ void setup(){
   can1.onReceive(&RxCallBack);
   can1.onMainLoop(&mainLoop);
   can1.begin(1000000, PA12_PA11);
-
-  can2.onReceive(&RxCallBack2);
-  can2.onMainLoop(&mainLoop2);
-  can2.begin(1000000, PB13_PB12);
 
   vTaskStartScheduler();
 }

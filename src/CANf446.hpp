@@ -472,8 +472,8 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
     CLEAR_BIT(CAN1->BTR, ((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF));
     SET_BIT(CAN1->BTR, (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF));
 
-    Serial.println("ループバックを有効化します");
-    SET_BIT(CAN1->BTR, CAN_BTR_LBKM);
+    //Serial.println("ループバックを有効化します");
+    //SET_BIT(CAN1->BTR, CAN_BTR_LBKM);
   
     Serial.print("BTR = 0x");
     Serial.println(CAN1->BTR, HEX);
@@ -528,8 +528,8 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
     CLEAR_BIT(CAN2->BTR, ((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF));
     SET_BIT(CAN2->BTR, (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF));
 
-    Serial.println("ループバックを有効化します");
-    SET_BIT(CAN2->BTR, CAN_BTR_LBKM);
+    //Serial.println("ループバックを有効化します");
+    //SET_BIT(CAN2->BTR, CAN_BTR_LBKM);
   
     CLEAR_BIT(CAN2->MCR, CAN_MCR_INRQ); //書き込みを終了する
 
