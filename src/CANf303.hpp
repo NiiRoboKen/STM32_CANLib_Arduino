@@ -77,15 +77,6 @@ class STM32CAN{
       loopCallBack = callback;
     }
 
-
-    void handleRxInterrupt(){
-      while (CAN1->RF0R & 0x3UL){
-        twai_message_t msg;
-        CANReceiveHardware(&msg);
-        
-      }
-    }
-
     TaskHandle_t RxTaskHandle = NULL;
     TaskHandle_t LoopTaskHandle = NULL;
     TaskHandle_t TxTaskHandle = NULL;
@@ -199,15 +190,16 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
   //タスクを作成
   BaseType_t isMainLoopTaskCreated, isRxTaskCreated, isTxTaskCreated;
 
-  isMainLoopTaskCreated = xTaskCreate(mainLoop, "Main_Loop", 512, this, 1, &LoopTaskHandle);
-  Serial.print("メインループのタスクを作成しました: ");
-  Serial.println(isMainLoopTaskCreated);
+  
   isRxTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 2, &RxTaskHandle);
   Serial.print("受信タスクを作成しました: ");
   Serial.println(isRxTaskCreated);
   isTxTaskCreated = xTaskCreate(txTask, "CAN_TX_Task", 512, this, 2, &TxTaskHandle);
   Serial.print("送信タスクを作成しました: ");
   Serial.println(isTxTaskCreated);
+  isMainLoopTaskCreated = xTaskCreate(mainLoop, "Main_Loop", 512, this, 1, &LoopTaskHandle);
+  Serial.print("メインループのタスクを作成しました: ");
+  Serial.println(isMainLoopTaskCreated);
 
   if(isMainLoopTaskCreated!=pdPASS || isRxTaskCreated!=pdPASS || isTxTaskCreated!=pdPASS){
     Serial.println("タスクの作成に失敗しました。");

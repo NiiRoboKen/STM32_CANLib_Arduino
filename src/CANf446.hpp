@@ -43,18 +43,26 @@ struct CAN_bit_timing_config_t{
   uint16_t BRP;
 };
 
+//それぞれのCANの使用状態の管理(複数インスタンスでの同一CANの使用を防ぐため)
+struct CAN_using{
+  bool CAN1using = false;
+  bool CAN2using = false;
+};
+inline CAN_using CAN_USING{};
+
 
 class STM32CAN{
   public:
-    static STM32CAN* instance;
-    STM32CAN(){
-      instance = this;
-    }
+    static STM32CAN* can1Instance;
+    static STM32CAN* can2Instance;
 
     bool begin(long bitrate, CANPinTypes SelectPin);
 
     bool send(const twai_message_t& msg){
-      return false;
+      if (txQueue == nullptr) {
+        return false;
+      }
+      return xQueueSend(txQueue, &msg, 0) == pdPASS;
     }
 
     //コールバック
@@ -64,11 +72,6 @@ class STM32CAN{
 
     void onMainLoop(void (*callback)()){
       loopCallBack = callback;
-    }
-
-    
-    void handleRxInterrupt(){
-      
     }
 
     TaskHandle_t RxTaskHandle = NULL;
@@ -149,8 +152,13 @@ class STM32CAN{
       Serial.println("TXTASK WAKE");
       while (true) {
         // TX Queueにメッセージが入るまで待つ
-
-        vTaskDelay(pdMS_TO_TICKS(10));
+        if (xQueueReceive(self->txQueue, &msg, portMAX_DELAY) == pdPASS){
+          Serial.println("TX Queueからメッセージを取得");
+          while (!self->CANSendToFreeMailbox(&msg)) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+          }
+          Serial.println("CAN mailboxへ投入");
+        }
       }
     }
 
@@ -166,36 +174,84 @@ class STM32CAN{
     }
 };
 
-inline STM32CAN* STM32CAN::instance = nullptr;
-
+inline STM32CAN* STM32CAN::can1Instance = nullptr;
+inline STM32CAN* STM32CAN::can2Instance = nullptr;
 
 bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
+  //複数インスタンスで一つのCANを使用できないようにする
+  if(SelectPin==PB13_PB12){
+    if(!(CAN_USING.CAN2using)){
+      CAN_USING.CAN2using = true;
+      can2Instance=this;
+    }else{
+      Serial.println("複数インスタンスによる一つのCANバスの操作はサポートされていません");
+      return false;
+    }
+  }else{
+    if(!(CAN_USING.CAN1using)){
+      CAN_USING.CAN1using = true;
+      can1Instance=this;
+    }else{
+      Serial.println("複数インスタンスによる一つのCANバスの操作はサポートされていません");
+      return false;
+    }
+  }
+
   if(!CANinit(bitrate, SelectPin)){
     Serial.println(SelectPin==PB13_PB12?"CAN2の初期化に失敗":"CAN1の初期化に失敗");
+    if(useCan2){
+      CAN_USING.CAN2using = false;
+      can2Instance = nullptr;
+    }else{
+      CAN_USING.CAN1using = false;
+      can1Instance = nullptr;
+    }
     return false;
   }
   Serial.println(SelectPin==PB13_PB12?"CAN2の初期化に成功":"CAN1の初期化に成功");
 
+  //キューの初期化
+  txQueue = xQueueCreate(CAN_TX_QUEUE_SIZE, sizeof(twai_message_t));
+
+  if (txQueue == nullptr) {
+    Serial.println("TX Queueの作成に失敗");
+    if(useCan2){
+      CAN_USING.CAN2using = false;
+      can2Instance = nullptr;
+    }else{
+      CAN_USING.CAN1using = false;
+      can1Instance = nullptr;
+    }
+    return false;
+  }
+
   //タスクを作成
   BaseType_t isMainLoopTaskCreated, isRxTaskCreated, isTxTaskCreated;
 
-  isMainLoopTaskCreated = xTaskCreate(mainLoop, "Main_Loop", 512, this, 1, &LoopTaskHandle);
+  isMainLoopTaskCreated = xTaskCreate(mainLoop, "Main_Loop", 512, this, 2, &LoopTaskHandle);
   Serial.print("メインループのタスクを作成しました: ");
   Serial.println(isMainLoopTaskCreated);
-  isRxTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 2, &RxTaskHandle);
+  isRxTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 1, &RxTaskHandle);
   Serial.print("受信タスクを作成しました: ");
   Serial.println(isRxTaskCreated);
-  isTxTaskCreated = xTaskCreate(txTask, "CAN_TX_Task", 512, this, 2, &TxTaskHandle);
+  isTxTaskCreated = xTaskCreate(txTask, "CAN_TX_Task", 512, this, 1, &TxTaskHandle);
   Serial.print("送信タスクを作成しました: ");
   Serial.println(isTxTaskCreated);
 
   if(isMainLoopTaskCreated!=pdPASS || isRxTaskCreated!=pdPASS || isTxTaskCreated!=pdPASS){
     Serial.println("タスクの作成に失敗しました。");
-    //return false;
+    if(useCan2){
+      CAN_USING.CAN2using = false;
+      can2Instance = nullptr;
+    }else{
+      CAN_USING.CAN1using = false;
+      can1Instance = nullptr;
+    }
+    return false;
   }
 
-  vTaskStartScheduler();
-  
+  //vTaskStartScheduler();
+
   return true;
 }
 
@@ -245,7 +301,7 @@ inline void STM32CAN::CANSetGpio(GPIO_TypeDef * addr, uint8_t index, uint8_t afr
     
     mask = 0x3 << _index2;
     addr->PUPDR   &= ~mask;           // Reset port pull-up/pull-down
-    
+    addr->PUPDR |= 0x1 << _index2;  // Pull-Up
 }
 
 
@@ -402,9 +458,8 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   if(!useCan2){
     //CAN1
     
-
     //スリープ解除
-    CLEAR_BIT(CAN1->MCR, CAN_MCR_SLEEP); 
+    CLEAR_BIT(CAN1->MCR, CAN_MCR_SLEEP);
     //while ((CAN1->MSR & CAN_MSR_SLAK) != 0); //SLEEPから起動するまで待つ
     SET_BIT(CAN1->MCR, CAN_MCR_INRQ); //CANを初期化状態にする
     while (!(CAN1->MSR & CAN_MSR_INAK)); //初期化状態になるのを待つ
@@ -444,6 +499,9 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
 
     Serial.print("SLEEP = ");
     Serial.println((CAN1->MCR & CAN_MCR_SLEEP) ? 1 : 0);
+
+    Serial.print("SLAK = ");
+    Serial.println((CAN1->MSR & CAN_MSR_SLAK) ? 1 : 0);
 
     Serial.print("INAK = ");
     Serial.println((CAN1->MSR & CAN_MSR_INAK) ? 1 : 0);
@@ -646,8 +704,8 @@ extern "C" void CAN1_RX0_IRQHandler(){
   BaseType_t higherPriorityTaskWoken = pdFALSE;
   // CAN1 FIFO0 RX割り込みを一旦無効化
   CAN1->IER &= ~CAN_IER_FMPIE0;
-  if (STM32CAN::instance->RxTaskHandle) {
-    vTaskNotifyGiveFromISR(STM32CAN::instance->RxTaskHandle, &higherPriorityTaskWoken);
+  if (STM32CAN::can1Instance && STM32CAN::can1Instance->RxTaskHandle) {
+    vTaskNotifyGiveFromISR(STM32CAN::can1Instance->RxTaskHandle, &higherPriorityTaskWoken);
   }
   portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
@@ -656,8 +714,8 @@ extern "C" void CAN2_RX0_IRQHandler(){
   BaseType_t higherPriorityTaskWoken = pdFALSE;
   // CAN2 FIFO0 RX割り込みを一旦無効化
   CAN2->IER &= ~CAN_IER_FMPIE0;
-  if (STM32CAN::instance->RxTaskHandle) {
-    vTaskNotifyGiveFromISR(STM32CAN::instance->RxTaskHandle, &higherPriorityTaskWoken);
+  if (STM32CAN::can2Instance && STM32CAN::can2Instance->RxTaskHandle) {
+    vTaskNotifyGiveFromISR(STM32CAN::can2Instance->RxTaskHandle, &higherPriorityTaskWoken);
   }
   portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
