@@ -261,43 +261,43 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
  *
  */
 inline void STM32CAN::CANSetGpio(GPIO_TypeDef * addr, uint8_t index, uint8_t afry, uint8_t speed = 3) {
-    uint8_t _index2 = index * 2;
-    uint8_t _index4 = index * 4;
-    uint8_t ofs = 0;
-    uint8_t setting;
+  uint8_t _index2 = index * 2;
+  uint8_t _index4 = index * 4;
+  uint8_t ofs = 0;
+  uint8_t setting;
 
-    if (index > 7) {
-      _index4 = (index - 8) * 4;
-      ofs = 1;
-    }
+  if (index > 7) {
+    _index4 = (index - 8) * 4;
+    ofs = 1;
+  }
 
-    uint32_t mask;
-    mask = 0xF << _index4;
-    CLEAR_BIT(addr->AFR[ofs], mask); // Reset alternate function
+  uint32_t mask;
+  mask = 0xF << _index4;
+  CLEAR_BIT(addr->AFR[ofs], mask); // Reset alternate function
     
-    setting = afry;                   // Alternative function selection
-    mask = setting << _index4;
-    SET_BIT(addr->AFR[ofs], mask); // Set alternate function
+  setting = afry;                   // Alternative function selection
+  mask = setting << _index4;
+  SET_BIT(addr->AFR[ofs], mask); // Set alternate function
     
-    mask = 0x3 << _index2;
-    CLEAR_BIT(addr->MODER, mask); // Reset mode
+  mask = 0x3 << _index2;
+  CLEAR_BIT(addr->MODER, mask); // Reset mode
 
-    setting = 0x2;                    // Alternate function mode
-    mask = setting << _index2;
-    SET_BIT(addr->MODER, mask); // Set mode
+  setting = 0x2;                    // Alternate function mode
+  mask = setting << _index2;
+  SET_BIT(addr->MODER, mask); // Set mode
     
-    mask = 0x3 << _index2;
-    CLEAR_BIT(addr->OSPEEDR, mask); // Reset speed
-    setting = speed;
-    mask = setting << _index2;
-    SET_BIT(addr->OSPEEDR, mask); // Set speed
+  mask = 0x3 << _index2;
+  CLEAR_BIT(addr->OSPEEDR, mask); // Reset speed
+  setting = speed;
+  mask = setting << _index2;
+  SET_BIT(addr->OSPEEDR, mask); // Set speed
     
-    mask = 0x1 << index;
-    CLEAR_BIT(addr->OTYPER, mask); // Reset Output push-pull
+  mask = 0x1 << index;
+  CLEAR_BIT(addr->OTYPER, mask); // Reset Output push-pull
     
-    mask = 0x3 << _index2;
-    CLEAR_BIT(addr->PUPDR, mask); // Reset port pull-up/pull-down
-    SET_BIT(addr->PUPDR, 0x1 << _index2); // Pull-Up
+  mask = 0x3 << _index2;
+  CLEAR_BIT(addr->PUPDR, mask); // Reset port pull-up/pull-down
+  SET_BIT(addr->PUPDR, 0x1 << _index2); // Pull-Up
 }
 
 
@@ -577,92 +577,89 @@ inline void STM32CAN::CANReceiveHardware(twai_message_t* CAN_rx_msg){
 
 //空きMainboxにデータを送る
 inline bool STM32CAN::CANSendToFreeMailbox(twai_message_t* CAN_tx_msg){
-    uint8_t mailbox;
+  uint8_t mailbox;
 
-    if(useCan2){//inline関数なのでメンバ変数が使える
-      if (CAN2->TSR & CAN_TSR_TME0) {
-        mailbox = 0;
-      }else if (CAN2->TSR & CAN_TSR_TME1) {
-        mailbox = 1;
-      }else if (CAN2->TSR & CAN_TSR_TME2) {
-        mailbox = 2;
-      }else {
-        return false;
-      }
-    }else{
-      if (CAN1->TSR & CAN_TSR_TME0) {
-        mailbox = 0;
-      }else if (CAN1->TSR & CAN_TSR_TME1) {
-        mailbox = 1;
-      }else if (CAN1->TSR & CAN_TSR_TME2) {
-        mailbox = 2;
-      }else {
-        return false;
-      }
+  if(useCan2){//inline関数なのでメンバ変数が使える
+    if (CAN2->TSR & CAN_TSR_TME0) {
+      mailbox = 0;
+    }else if (CAN2->TSR & CAN_TSR_TME1) {
+      mailbox = 1;
+    }else if (CAN2->TSR & CAN_TSR_TME2) {
+      mailbox = 2;
+    }else {
+      return false;
     }
-    // 空きMailbox探索
+  }else{
+    if (CAN1->TSR & CAN_TSR_TME0) {
+      mailbox = 0;
+    }else if (CAN1->TSR & CAN_TSR_TME1) {
+      mailbox = 1;
+    }else if (CAN1->TSR & CAN_TSR_TME2) {
+      mailbox = 2;
+    }else {
+      return false;
+    }
+  }
+  // 空きMailbox探索
     
+  uint32_t out = 0;
 
-    uint32_t out = 0;
+  // ID設定
+  if (CAN_tx_msg->extd == EXTENDED_FORMAT) {
+      out = ((CAN_tx_msg->identifier & CAN_EXT_ID_MASK) << 3U) | STM32_CAN_TIR_IDE;
+  }
+  else {
+      out = ((CAN_tx_msg->identifier & CAN_STD_ID_MASK) << 21U);
+  }
 
-    // ID設定
-    if (CAN_tx_msg->extd == EXTENDED_FORMAT) {
-        out = ((CAN_tx_msg->identifier & CAN_EXT_ID_MASK) << 3U)
-            | STM32_CAN_TIR_IDE;
-    }
-    else {
-        out = ((CAN_tx_msg->identifier & CAN_STD_ID_MASK) << 21U);
-    }
+  // RTR
+  if (CAN_tx_msg->rtr == REMOTE_FRAME) {
+    SET_BIT(out, STM32_CAN_TIR_RTR);
+  }
 
-    // RTR
-    if (CAN_tx_msg->rtr == REMOTE_FRAME) {
-      SET_BIT(out, STM32_CAN_TIR_RTR);
-    }
+  if(useCan2){
+    // DLC
+    CAN2->sTxMailBox[mailbox].TDTR = (CAN_tx_msg->data_length_code & 0xFUL);
 
-    if(useCan2){
-      // DLC
-      CAN2->sTxMailBox[mailbox].TDTR =
-        (CAN_tx_msg->data_length_code & 0xFUL);
+    // DATA LOW
+    CAN2->sTxMailBox[mailbox].TDLR =
+      (((uint32_t)CAN_tx_msg->data[3] << 24) |
+       ((uint32_t)CAN_tx_msg->data[2] << 16) |
+       ((uint32_t)CAN_tx_msg->data[1] << 8 ) |
+       ((uint32_t)CAN_tx_msg->data[0]));
 
-      // DATA LOW
-      CAN2->sTxMailBox[mailbox].TDLR =
-        (((uint32_t)CAN_tx_msg->data[3] << 24) |
-         ((uint32_t)CAN_tx_msg->data[2] << 16) |
-         ((uint32_t)CAN_tx_msg->data[1] << 8 ) |
-         ((uint32_t)CAN_tx_msg->data[0]));
+    // DATA HIGH
+    CAN2->sTxMailBox[mailbox].TDHR =
+      (((uint32_t)CAN_tx_msg->data[7] << 24) |
+       ((uint32_t)CAN_tx_msg->data[6] << 16) |
+       ((uint32_t)CAN_tx_msg->data[5] << 8 ) |
+       ((uint32_t)CAN_tx_msg->data[4]));
 
-      // DATA HIGH
-      CAN2->sTxMailBox[mailbox].TDHR =
-        (((uint32_t)CAN_tx_msg->data[7] << 24) |
-         ((uint32_t)CAN_tx_msg->data[6] << 16) |
-         ((uint32_t)CAN_tx_msg->data[5] << 8 ) |
-         ((uint32_t)CAN_tx_msg->data[4]));
+    // 送信開始
+    CAN2->sTxMailBox[mailbox].TIR = out | STM32_CAN_TIR_TXRQ;
+  }else{
+    // DLC
+    CAN1->sTxMailBox[mailbox].TDTR =
+      (CAN_tx_msg->data_length_code & 0xFUL);
 
-      // 送信開始
-      CAN2->sTxMailBox[mailbox].TIR = out | STM32_CAN_TIR_TXRQ;
-    }else{
-      // DLC
-      CAN1->sTxMailBox[mailbox].TDTR =
-        (CAN_tx_msg->data_length_code & 0xFUL);
+    // DATA LOW
+    CAN1->sTxMailBox[mailbox].TDLR =
+      (((uint32_t)CAN_tx_msg->data[3] << 24) |
+       ((uint32_t)CAN_tx_msg->data[2] << 16) |
+       ((uint32_t)CAN_tx_msg->data[1] << 8 ) |
+       ((uint32_t)CAN_tx_msg->data[0]));
 
-      // DATA LOW
-      CAN1->sTxMailBox[mailbox].TDLR =
-        (((uint32_t)CAN_tx_msg->data[3] << 24) |
-         ((uint32_t)CAN_tx_msg->data[2] << 16) |
-         ((uint32_t)CAN_tx_msg->data[1] << 8 ) |
-         ((uint32_t)CAN_tx_msg->data[0]));
+    // DATA HIGH
+    CAN1->sTxMailBox[mailbox].TDHR =
+      (((uint32_t)CAN_tx_msg->data[7] << 24) |
+       ((uint32_t)CAN_tx_msg->data[6] << 16) |
+       ((uint32_t)CAN_tx_msg->data[5] << 8 ) |
+       ((uint32_t)CAN_tx_msg->data[4]));
 
-      // DATA HIGH
-      CAN1->sTxMailBox[mailbox].TDHR =
-        (((uint32_t)CAN_tx_msg->data[7] << 24) |
-         ((uint32_t)CAN_tx_msg->data[6] << 16) |
-         ((uint32_t)CAN_tx_msg->data[5] << 8 ) |
-         ((uint32_t)CAN_tx_msg->data[4]));
-
-      // 送信開始
-      CAN1->sTxMailBox[mailbox].TIR = out | STM32_CAN_TIR_TXRQ;
-    }
-    return true;
+    // 送信開始
+    CAN1->sTxMailBox[mailbox].TIR = out | STM32_CAN_TIR_TXRQ;
+  }
+  return true;
 }
 
 
