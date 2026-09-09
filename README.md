@@ -85,6 +85,8 @@ beginに渡すピンの設定 enum CanPinTypes
 |f446|CAN1|PA12_PA11|
 |  |CAN2|PB13_PB12|
 
+STM32freeRTOSを使用するため、https://github.com/stm32duino/STM32FreeRTOS.gitが必要です。
+
 setupの最後にRTOSのタスクを実行させるためにvTaskStartScheduler();を書いてください。
 
 複数インスタンスからの1つのCANの操作はサポートしてません
