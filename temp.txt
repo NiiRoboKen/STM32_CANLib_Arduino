@@ -34,57 +34,43 @@ void mainLoop(){
 
     msg.extd = STANDARD_FORMAT;
     msg.rtr = DATA_FRAME;
-    msg.identifier = 0x123;
+    msg.identifier = 0x000;
     msg.data_length_code = 8;
 
     for (int i = 0; i < 8; i++) {
       msg.data[i] = i;
     }
-
+    Serial.print("send: ");
     Serial.println(can1.send(msg));
 
-    a=true;
+    uint32_t tsr = CAN1->TSR;
+
+Serial.printf(
+    "TSR=0x%08lX "
+    "TME=%lu TXOK0=%d TERR0=%d ALST0=%d RQCP0=%d\n",
+    tsr,
+    (tsr >> 26) & 0x7,
+    (tsr >> 1) & 1,
+    (tsr >> 3) & 1,
+    (tsr >> 2) & 1,
+    tsr & 1
+);
+
+uint32_t esr = CAN1->ESR;
+
+Serial.printf(
+    "ESR=0x%08lX TEC=%lu REC=%lu LEC=%lu\n",
+    esr,
+    (esr >> 24) & 0xFF,
+    (esr >> 16) & 0xFF,
+    (esr >> 4) & 0x7
+);
+
+    //a=true;
+    delay(1000);
   }
 }
 
-void RxCallBack2(twai_message_t msg){
-  Serial.println("CAN2の結果");
-  //10進数表示
-  Serial.println(msg.identifier); //291
-  //16進数表示
-  Serial.println(msg.identifier, HEX); //123
-
-  Serial.println(msg.data[0]); //0
-  Serial.println(msg.data[1]); //1
-  Serial.println(msg.data[2]); //2
-  Serial.println(msg.data[3]); //3
-  Serial.println(msg.data[4]); //4
-  Serial.println(msg.data[5]); //5
-  Serial.println(msg.data[6]); //6
-  Serial.println(msg.data[7]); //7
-}
-
-volatile bool b = false;
-void mainLoop2(){
-  if(!b){
-    Serial.println("mainloop call!");
-
-    twai_message_t msg{};
-
-    msg.extd = STANDARD_FORMAT;
-    msg.rtr = DATA_FRAME;
-    msg.identifier = 0x123;
-    msg.data_length_code = 8;
-
-    for (int i = 0; i < 8; i++) {
-      msg.data[i] = i;
-    }
-
-    Serial.println(can2.send(msg));
-
-    b=true;
-  }
-}
 
 /*
 CAN1 MCR = 0x40
@@ -96,11 +82,7 @@ void setup(){
   Serial.begin(115200);
   can1.onReceive(&RxCallBack);
   can1.onMainLoop(&mainLoop);
-  can1.begin(1000000, PA12_PA11);
-
-  can2.onReceive(&RxCallBack2);
-  can2.onMainLoop(&mainLoop2);
-  can2.begin(1000000, PB13_PB12);
+  can1.begin(100000, PA12_PA11);
 
   vTaskStartScheduler();
 }
@@ -147,7 +129,14 @@ void mainLoop(){
 
     Serial.println(can.send(msg));
 
-    a=true;
+    //a=true;
+
+    Serial.print("ESR = 0x");
+    Serial.println(CAN1->ESR, HEX);
+
+    Serial.print("TSR = 0x");
+    Serial.println(CAN1->TSR, HEX);
+    delay(1000);
   }
 }
 
@@ -155,7 +144,7 @@ void setup(){
   Serial.begin(115200);
   can.onReceive(&RxCallBack);
   can.onMainLoop(&mainLoop);
-  can.begin(1000000, PA12_PA11);
+  can.begin(100000, PA12_PA11);
 }
 
 void loop(){}

@@ -167,7 +167,7 @@ class STM32CAN{
         if(self->loopCallBack){
           self->loopCallBack();
         }
-        vTaskDelay(pdMS_TO_TICKS(10));//ここは要調整
+        vTaskDelay(pdMS_TO_TICKS(1));//ここは要調整
       }
     }
 };

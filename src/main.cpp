@@ -3,10 +3,9 @@
 #include <Arduino.h>
 
 #if defined(STM32F4xx)
-#include "CANf446.hpp"
+#include "STM32_CAN.hpp"
 
 STM32CAN can1;
-STM32CAN can2;
 
 void RxCallBack(twai_message_t msg){
   Serial.println("CAN1の結果");
@@ -34,7 +33,7 @@ void mainLoop(){
 
     msg.extd = STANDARD_FORMAT;
     msg.rtr = DATA_FRAME;
-    msg.identifier = 0x123;
+    msg.identifier = 0x000;
     msg.data_length_code = 8;
 
     for (int i = 0; i < 8; i++) {
@@ -43,9 +42,31 @@ void mainLoop(){
     Serial.print("send: ");
     Serial.println(can1.send(msg));
 
+    uint32_t tsr = CAN1->TSR;
 
-    a=true;
-    //delay(1000);
+Serial.printf(
+    "TSR=0x%08lX "
+    "TME=%lu TXOK0=%d TERR0=%d ALST0=%d RQCP0=%d\n",
+    tsr,
+    (tsr >> 26) & 0x7,
+    (tsr >> 1) & 1,
+    (tsr >> 3) & 1,
+    (tsr >> 2) & 1,
+    tsr & 1
+);
+
+uint32_t esr = CAN1->ESR;
+
+Serial.printf(
+    "ESR=0x%08lX TEC=%lu REC=%lu LEC=%lu\n",
+    esr,
+    (esr >> 24) & 0xFF,
+    (esr >> 16) & 0xFF,
+    (esr >> 4) & 0x7
+);
+
+    //a=true;
+    delay(1000);
   }
 }
 

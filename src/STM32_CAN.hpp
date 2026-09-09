@@ -37,7 +37,7 @@ class CanDriver{
     void (*rxCallback)(twai_message_t msg) = nullptr;
     void (*loopTask)() = nullptr;
 
-    int WhichCanUsing(bool CAN1USE, bool CAN2USE){
+    void WhichCanUsing(bool CAN1USE, bool CAN2USE){
       if(CAN1USE){
         CAN1USING = true;
       }else if(CAN2USE){
