@@ -6,6 +6,7 @@
 #include "STM32_CAN.hpp"
 
 STM32CAN can1;
+STM32CAN can2;
 
 void RxCallBack(twai_message_t msg){
   Serial.println("CAN1の結果");
@@ -42,29 +43,6 @@ void mainLoop(){
     Serial.print("send: ");
     Serial.println(can1.send(msg));
 
-    uint32_t tsr = CAN1->TSR;
-
-Serial.printf(
-    "TSR=0x%08lX "
-    "TME=%lu TXOK0=%d TERR0=%d ALST0=%d RQCP0=%d\n",
-    tsr,
-    (tsr >> 26) & 0x7,
-    (tsr >> 1) & 1,
-    (tsr >> 3) & 1,
-    (tsr >> 2) & 1,
-    tsr & 1
-);
-
-uint32_t esr = CAN1->ESR;
-
-Serial.printf(
-    "ESR=0x%08lX TEC=%lu REC=%lu LEC=%lu\n",
-    esr,
-    (esr >> 24) & 0xFF,
-    (esr >> 16) & 0xFF,
-    (esr >> 4) & 0x7
-);
-
     //a=true;
     delay(1000);
   }
@@ -82,6 +60,8 @@ void setup(){
   can1.onReceive(&RxCallBack);
   can1.onMainLoop(&mainLoop);
   can1.begin(100000, PA12_PA11);
+
+  can2.begin(100000, PB13_PB12);
 
   vTaskStartScheduler();
 }

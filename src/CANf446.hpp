@@ -167,7 +167,7 @@ class STM32CAN{
         if(self->loopCallBack){
           self->loopCallBack();
         }
-        vTaskDelay(pdMS_TO_TICKS(1));//ここは要調整
+        vTaskDelay(pdMS_TO_TICKS(10));//ここは要調整
       }
     }
 };
@@ -473,36 +473,7 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
     //Serial.println("ループバックを有効化します");
     //SET_BIT(CAN1->BTR, CAN_BTR_LBKM);
   
-    Serial.print("BTR = 0x");
-    Serial.println(CAN1->BTR, HEX);
-
-    Serial.print("LBKM = ");
-    Serial.println((CAN1->BTR & CAN_BTR_LBKM) ? 1 : 0);
-
-    Serial.print("MCR = 0x");
-    Serial.println(CAN1->MCR, HEX);
-
-    Serial.print("Before MSR = 0x");
-    Serial.println(CAN1->MSR, HEX);
-
-
     CLEAR_BIT(CAN1->MCR, CAN_MCR_INRQ); //書き込みを終了する
-
-
-    Serial.print("After MSR = 0x");
-    Serial.println(CAN1->MSR, HEX);
-
-    Serial.print("INRQ = ");
-    Serial.println((CAN1->MCR & CAN_MCR_INRQ) ? 1 : 0);
-
-    Serial.print("SLEEP = ");
-    Serial.println((CAN1->MCR & CAN_MCR_SLEEP) ? 1 : 0);
-
-    Serial.print("SLAK = ");
-    Serial.println((CAN1->MSR & CAN_MSR_SLAK) ? 1 : 0);
-
-    Serial.print("INAK = ");
-    Serial.println((CAN1->MSR & CAN_MSR_INAK) ? 1 : 0);
 
     // Wait for normal mode
     int timelimit = 0;
