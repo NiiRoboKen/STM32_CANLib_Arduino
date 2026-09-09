@@ -8,9 +8,8 @@ STM32 F303K8, F446RE 用のArduinoフレームワークCANライブラリ（F303
 f303はループバックでは正常にテスト出来ていることを確認しました
 次はCANトランシーバーを使用して送受信、通信速度が確かに反映されているのかを確認します。
 
-
-f446もループバックでは正常にテスト出来ていることを確認しました
-次はCANトランシーバーを使用して送受信、通信速度が確かに反映されているのかを確認します。
+f446はESP32とも通信できました
+多分446は閑静です
 
 それぞれのBTRレジスタに代入する設定値は一応再計算しました。
 後で見た目は整えます
@@ -41,7 +40,7 @@ void RxCallBack(twai_message_t msg){
 }
 
 volatile bool a = false;
-void mainLoop(){
+void mainLoop(){ //loopが使用できないかわりのloop関数
   if(!a){
     Serial.println("mainloop call!");
 
@@ -83,6 +82,10 @@ beginに渡すピンの設定 enum CanPinTypes
 |  |  |  |
 |f446|CAN1|PA12_PA11|
 |  |CAN2|PB13_PB12|
+
+setupの最後にRTOSのタスクを実行させるためにvTaskStartScheduler();を書いてください。
+
+複数インスタンスからの1つのCANの操作はサポートしてません
 
 ESP32の方と同ように扱えるようにするために、twai_message_tとしています。中の変数名も揃えています。（一部未使用の変数は削除してあります）
 

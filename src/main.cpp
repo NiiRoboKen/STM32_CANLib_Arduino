@@ -40,16 +40,12 @@ void mainLoop(){
     for (int i = 0; i < 8; i++) {
       msg.data[i] = i;
     }
-
+    Serial.print("send: ");
     Serial.println(can1.send(msg));
 
-    Serial.print("ESR = 0x");
-    Serial.println(CAN1->ESR, HEX);
-
-    Serial.print("TSR = 0x");
-    Serial.println(CAN1->TSR, HEX);
 
     a=true;
+    //delay(1000);
   }
 }
 
@@ -64,7 +60,7 @@ void setup(){
   Serial.begin(115200);
   can1.onReceive(&RxCallBack);
   can1.onMainLoop(&mainLoop);
-  can1.begin(1000000, PA12_PA11);
+  can1.begin(100000, PA12_PA11);
 
   vTaskStartScheduler();
 }
@@ -111,7 +107,14 @@ void mainLoop(){
 
     Serial.println(can.send(msg));
 
-    a=true;
+    //a=true;
+
+    Serial.print("ESR = 0x");
+    Serial.println(CAN1->ESR, HEX);
+
+    Serial.print("TSR = 0x");
+    Serial.println(CAN1->TSR, HEX);
+    delay(1000);
   }
 }
 
@@ -119,7 +122,7 @@ void setup(){
   Serial.begin(115200);
   can.onReceive(&RxCallBack);
   can.onMainLoop(&mainLoop);
-  can.begin(1000000, PA12_PA11);
+  can.begin(100000, PA12_PA11);
 }
 
 void loop(){}

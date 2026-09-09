@@ -12,7 +12,6 @@
   #include "CANf303.hpp"
 #elif defined(STM32F4xx)
   #include "CANf446.hpp"
-  //enum CANPinTypes {PA12_PA11, PB13_PB12}; //F446RE
 #endif
 
 //STM32_CAN.hpp
@@ -20,13 +19,10 @@
 /*
 残りのタスク
 
-骨組みの構築
-
 f303とf406のドライバをclassでラップする
 
 */
 
-//ラッパークラス
 class CanDriver{
   public:
     bool begin(long baudRate, CANPinTypes pins);
@@ -35,9 +31,11 @@ class CanDriver{
     bool send(uint16_t id, uint8_t data[8]);
 
     void onReceive(void (*callback)(twai_message_t msg));
+    void onMainLoop(void (*callback)());
   
   private:
     void (*rxCallback)(twai_message_t msg) = nullptr;
+    void (*loopTask)() = nullptr;
 
     int WhichCanUsing(bool CAN1USE, bool CAN2USE){
       if(CAN1USE){
@@ -57,9 +55,14 @@ STM32CAN Can1;
 
 void CanDriver::onReceive(void (*callback)(twai_message_t msg)){
   rxCallback = callback;
-
   //コールバックが登録されていたら登録
   if(rxCallback) Can1.onReceive(rxCallback);
+}
+
+void CanDriber::onMainLoop(void (*callback)()){
+  loopTask = callback;
+  //コールバックが登録されていたら登録
+  if(loopTask) Can1.onReceive(loopTask);
 }
 
 bool CanDriver::begin(long baudRate, CANPinTypes pins){
