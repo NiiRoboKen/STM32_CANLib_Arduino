@@ -19,7 +19,9 @@ f446はESP32とも通信できました
 ### 例文(完成予定の構文)
 ```cpp
 #include <Arduino.h>
-#include "STM32_CAN.hpp"
+
+//f303とf446を統合したhppです。直接CANf303.hpp/CANf446.hppを使っても動作に支障はないはずです
+#include "STM32_CAN.hpp" 
 
 CanDriver can;
 
