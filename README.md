@@ -94,3 +94,4 @@ setupの最後にRTOSのタスクを実行させるためにvTaskStartScheduler(
 ESP32の方と同じように扱えるようにするために、twai_message_tとしています。中の変数名も揃えています。（一部未使用の変数は削除してあります）
 
 freeRTOSを積む意味はあったのだろうか...?
+いずれHALに書き換えます

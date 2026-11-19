@@ -59,10 +59,10 @@ void CanDriver::onReceive(void (*callback)(twai_message_t msg)){
   if(rxCallback) Can1.onReceive(rxCallback);
 }
 
-void CanDriber::onMainLoop(void (*callback)()){
+void CanDriver::onMainLoop(void (*callback)()){
   loopTask = callback;
   //コールバックが登録されていたら登録
-  if(loopTask) Can1.onReceive(loopTask);
+  if(loopTask) Can1.onMainLoop(loopTask);
 }
 
 bool CanDriver::begin(long baudRate, CANPinTypes pins){

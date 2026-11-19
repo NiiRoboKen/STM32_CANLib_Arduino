@@ -70,6 +70,7 @@ void loop(){}
 #endif
 
 #if defined(STM32F3xx)
+
 #include "CANf303.hpp"
 
 STM32CAN can;
@@ -108,6 +109,10 @@ void mainLoop(){
 
     Serial.println(can.send(msg));
 
+    //Serial.printf("TSR = %08lX\n", CAN1->TSR);
+    //Serial.printf("ESR = %08lX\n", CAN1->ESR);
+    //Serial.printf("TIR0 = %08lX\n", CAN1->sTxMailBox[0].TIR);
+
     //a=true;
 
     Serial.print("ESR = 0x");
@@ -115,7 +120,7 @@ void mainLoop(){
 
     Serial.print("TSR = 0x");
     Serial.println(CAN1->TSR, HEX);
-    delay(1000);
+    vTaskDelay(1000);
   }
 }
 
@@ -127,4 +132,6 @@ void setup(){
 }
 
 void loop(){}
+
+
 #endif

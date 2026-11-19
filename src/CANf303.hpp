@@ -33,11 +33,11 @@ enum CAN_FRAME {DATA_FRAME = 0, REMOTE_FRAME};
 enum CANPinTypes {PA12_PA11};
 
 struct twai_message_t{        //CAN_msg_tでは
-    uint32_t extd;            //format
-    uint32_t rtr;             //type
-    uint32_t identifier;      //id
-    uint8_t data_length_code; //len
-    uint8_t data[8];          //data[8]
+  uint32_t extd;            //format
+  uint32_t rtr;             //type
+  uint32_t identifier;      //id
+  uint8_t data_length_code; //len
+  uint8_t data[8];          //data[8]
 };
 
 //RXのメッセージを一時的に格納する
@@ -49,7 +49,6 @@ struct CAN_bit_timing_config_t{
   uint8_t TS1;
   uint16_t BRP;
 };
-
 
 
 class STM32CAN{
@@ -133,9 +132,8 @@ class STM32CAN{
             self->rxCallback(msg);
           }
         }
-
         // FIFOを処理し終わったのでRX IRQを再有効化
-        CAN1->IER |= CAN_IER_FMPIE0;
+        SET_BIT(CAN1->IER, CAN_IER_FMPIE0);
 
       }
     }
@@ -203,7 +201,7 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
 
   if(isMainLoopTaskCreated!=pdPASS || isRxTaskCreated!=pdPASS || isTxTaskCreated!=pdPASS){
     Serial.println("タスクの作成に失敗しました。");
-    //return false;
+    return false;
   }
 
   vTaskStartScheduler();
@@ -222,42 +220,44 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
  *
  */
 inline void STM32CAN::CANSetGpio(GPIO_TypeDef * addr, uint8_t index, uint8_t afry, uint8_t speed = 3) {
-    uint8_t _index2 = index * 2;
-    uint8_t _index4 = index * 4;
-    uint8_t ofs = 0;
-    uint8_t setting;
+  uint8_t _index2 = index * 2;
+  uint8_t _index4 = index * 4;
+  uint8_t ofs = 0;
+  uint8_t setting;
 
-    if (index > 7) {
-      _index4 = (index - 8) * 4;
-      ofs = 1;
-    }
+  if (index > 7) {
+    _index4 = (index - 8) * 4;
+    ofs = 1;
+  }
 
-    uint32_t mask;
-    mask = 0xF << _index4;
-    addr->AFR[ofs]  &= ~mask;         // Reset alternate function
-    //setting = 0x9;                    // STM32_AF9
-    setting = afry;                   // Alternative function selection
-    mask = setting << _index4;
-    addr->AFR[ofs]  |= mask;          // Set alternate function
-    
-    mask = 0x3 << _index2;
-    addr->MODER   &= ~mask;           // Reset mode
-    setting = 0x2;                    // Alternate function mode
-    mask = setting << _index2;
-    addr->MODER   |= mask;            // Set mode
-    
-    mask = 0x3 << _index2;
-    addr->OSPEEDR &= ~mask;           // Reset speed
-    setting = speed;
-    mask = setting << _index2;
-    addr->OSPEEDR |= mask;            // Set speed
-    
-    mask = 0x1 << index;
-    addr->OTYPER  &= ~mask;           // Reset Output push-pull
-    
-    mask = 0x3 << _index2;
-    addr->PUPDR   &= ~mask;           // Reset port pull-up/pull-down
-    
+  uint32_t mask;
+  mask = 0xF << _index4;
+  CLEAR_BIT(addr->AFR[ofs], mask); // Reset alternate function
+  setting = afry;                  // Alternative function selection
+  mask = setting << _index4;
+  SET_BIT(addr->AFR[ofs], mask);   // Set alternate function
+  
+  mask = 0x3 << _index2;
+  CLEAR_BIT(addr->MODER, mask);    // Reset mode
+  setting = 0x2;                   // Alternate function mode
+  mask = setting << _index2;
+  SET_BIT(addr->MODER, mask);      // Set mode
+  
+  mask = 0x3 << _index2;
+  CLEAR_BIT(addr->OSPEEDR, mask);  // Reset speed
+  setting = speed;
+  mask = setting << _index2;
+  SET_BIT(addr->OSPEEDR, mask);    // Set speed
+
+  mask = 0x1 << index;
+  CLEAR_BIT(addr->OTYPER, mask);   // Reset Output push-pull
+
+  //mask = 0x3 << _index2;
+  //SET_BIT(addr->PUPDR, mask);      // Reset port pull-up/pull-down
+  
+  //mask = 0x3 << _index2;
+  //CLEAR_BIT(addr->PUPDR, mask); // Reset port pull-up/pull-down
+  //SET_BIT(addr->PUPDR, 0x1 << _index2); // Pull-Up  
 }
 
 
@@ -334,7 +334,6 @@ CAN bitrate = PCLK1 / (BRP × (1 + TS1 + TS2))
     0.05MHz = 32MHz / (40*(1+12+3))
 */
 
-//要調整
 inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
   switch(baud){
     case (long)50E3:
@@ -373,8 +372,7 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
 
   CAN1->MCR |= 0x1UL;                   // CANを初期化状態にする
   while (!(CAN1->MSR & 0x1UL));         // 初期化状態になるのを待つ
-  //CAN1->MCR = 0x51UL;                   // ハードウェアの初期化(自動的に再送信しない)
-  //CAN1->MCR = 0x41UL;                   // ハードウェアの初期化(自動的に再送信する)
+
   CAN1->MCR = 0;
   CAN1->MCR |= CAN_MCR_ABOM;
 
@@ -384,9 +382,6 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   // ビットレートを設定 
   CAN_bit_timing_config_t configData = ConvBaudrate(bitrate);
 
-  //Serial.printf("TS2: %d\n",configData.TS2);
-  //Serial.printf("TS1: %d\n",configData.TS1);
-  //Serial.printf("BRP: %d\n",configData.BRP);
   
   CAN1->BTR &= ~(((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF)); 
   CAN1->BTR |= (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF);
@@ -400,7 +395,7 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   CAN1->MCR &= ~CAN_MCR_INRQ;
 
   // フィルターの設定
-  CAN1->FMR |=   0x1UL; // フィルターを初期化状態にする
+  CAN1->FMR |= 0x1UL; // フィルターを初期化状態にする
 
   // フィルター0を初期化
   // Single 32-bit scale configuration 
@@ -414,19 +409,9 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
   CAN1->MCR &= ~(0x1UL);                // Require CAN1 to normal mode 
 
   //割り込み有効化
-
-  //Time inperruptの有効化
-  //CAN1->IER |= CAN_IER_TMEIE;
-
-  //Serial.printf("TX IER after enable = 0x%08lX\n", CAN1->IER);
   
   // RX FIFO0 message pending interrupt
   CAN1->IER |= CAN_IER_FMPIE0;
-
-  //Serial.printf("RX IER after enable = 0x%08lX\n", CAN1->IER);
-
-  // TxのNVICによる割り込み有効化
-  //NVIC_EnableIRQ(USB_HP_CAN_TX_IRQn);
 
   // RxのNVICによる割り込み有効化
   NVIC_SetPriority(USB_LP_CAN_RX0_IRQn, 5);
@@ -472,7 +457,6 @@ inline void STM32CAN::CANReceiveHardware(twai_message_t* CAN_rx_msg){
   else {                               // Remote frame
       CAN_rx_msg->rtr = REMOTE_FRAME;
   }
-
   
   CAN_rx_msg->data_length_code = (CAN1->sFIFOMailBox[0].RDTR) & 0xFUL;
   
@@ -493,66 +477,59 @@ inline void STM32CAN::CANReceiveHardware(twai_message_t* CAN_rx_msg){
 
 //空きMainboxにデータを送る
 inline bool STM32CAN::CANSendToFreeMailbox(twai_message_t* CAN_tx_msg){
-    uint8_t mailbox;
+  uint8_t mailbox;
 
-    // 空きMailbox探索
-    if (CAN1->TSR & CAN_TSR_TME0) {
-        mailbox = 0;
-    }
-    else if (CAN1->TSR & CAN_TSR_TME1) {
-        mailbox = 1;
-    }
-    else if (CAN1->TSR & CAN_TSR_TME2) {
-        mailbox = 2;
-    }
-    else {
-        return false;
-    }
+  // 空きMailbox探索
+  if (CAN1->TSR & CAN_TSR_TME0) {
+    mailbox = 0;
+  }else if (CAN1->TSR & CAN_TSR_TME1) {
+    mailbox = 1;
+  }else if (CAN1->TSR & CAN_TSR_TME2) {
+    mailbox = 2;
+  }else {
+    return false;
+  }
 
-    uint32_t out = 0;
+  uint32_t out = 0;
 
-    // ID設定
-    if (CAN_tx_msg->extd == EXTENDED_FORMAT) {
-        out = ((CAN_tx_msg->identifier & CAN_EXT_ID_MASK) << 3U)
-            | STM32_CAN_TIR_IDE;
-    }
-    else {
-        out = ((CAN_tx_msg->identifier & CAN_STD_ID_MASK) << 21U);
-    }
+  // ID設定
+  if (CAN_tx_msg->extd == EXTENDED_FORMAT) {
+    out = ((CAN_tx_msg->identifier & CAN_EXT_ID_MASK) << 3U) | STM32_CAN_TIR_IDE;
+  }else {
+    out = ((CAN_tx_msg->identifier & CAN_STD_ID_MASK) << 21U);
+  }
 
-    // RTR
-    if (CAN_tx_msg->rtr == REMOTE_FRAME) {
-        out |= STM32_CAN_TIR_RTR;
-    }
+  // RTR
+  if (CAN_tx_msg->rtr == REMOTE_FRAME) {
+    out |= STM32_CAN_TIR_RTR;
+  }
 
-    // DLC
-    CAN1->sTxMailBox[mailbox].TDTR =
-        (CAN_tx_msg->data_length_code & 0xFUL);
+  // DLC
+  CAN1->sTxMailBox[mailbox].TDTR = (CAN_tx_msg->data_length_code & 0xFUL);
 
-    // DATA LOW
-    CAN1->sTxMailBox[mailbox].TDLR =
-        (((uint32_t)CAN_tx_msg->data[3] << 24) |
-         ((uint32_t)CAN_tx_msg->data[2] << 16) |
-         ((uint32_t)CAN_tx_msg->data[1] << 8 ) |
-         ((uint32_t)CAN_tx_msg->data[0]));
+  // DATA LOW
+  CAN1->sTxMailBox[mailbox].TDLR = 
+   (((uint32_t)CAN_tx_msg->data[3] << 24) |
+   ((uint32_t)CAN_tx_msg->data[2] << 16) |
+   ((uint32_t)CAN_tx_msg->data[1] << 8 ) |
+   ((uint32_t)CAN_tx_msg->data[0]));
 
-    // DATA HIGH
-    CAN1->sTxMailBox[mailbox].TDHR =
-        (((uint32_t)CAN_tx_msg->data[7] << 24) |
-         ((uint32_t)CAN_tx_msg->data[6] << 16) |
-         ((uint32_t)CAN_tx_msg->data[5] << 8 ) |
-         ((uint32_t)CAN_tx_msg->data[4]));
+  // DATA HIGH
+  CAN1->sTxMailBox[mailbox].TDHR =
+   (((uint32_t)CAN_tx_msg->data[7] << 24) |
+   ((uint32_t)CAN_tx_msg->data[6] << 16) |
+   ((uint32_t)CAN_tx_msg->data[5] << 8 ) |
+   ((uint32_t)CAN_tx_msg->data[4]));
 
-    // 送信開始
-    CAN1->sTxMailBox[mailbox].TIR = out | STM32_CAN_TIR_TXRQ;
+  // 送信開始
+  CAN1->sTxMailBox[mailbox].TIR = out | STM32_CAN_TIR_TXRQ;
 
-    return true;
+  return true;
 }
-
 
 extern "C" void USB_LP_CAN_RX0_IRQHandler(){
   BaseType_t higherPriorityTaskWoken = pdFALSE;
-  CAN1->IER &= ~CAN_IER_FMPIE0; //割り込みの連鎖が起きるのを防ぐために一旦無効化
+  CLEAR_BIT(CAN1->IER, CAN_IER_FMPIE0); //割り込みの連鎖が起きるのを防ぐために一旦無効化
   // RX Taskに通知
   if(STM32CAN::instance->RxTaskHandle){
     vTaskNotifyGiveFromISR(
