@@ -2,6 +2,8 @@
 
 #include <STM32FreeRTOS.h>
 #include <Arduino.h>
+#include <stm32f3xx_hal.h>
+#include <stm32f3xx_hal_can.h>
 
 #if defined(STM32F3xx)
 
@@ -40,10 +42,6 @@ struct twai_message_t{        //CAN_msg_tでは
   uint8_t data[8];          //data[8]
 };
 
-//RXのメッセージを一時的に格納する
-twai_message_t RxMsg;
-
-
 struct CAN_bit_timing_config_t{
   uint8_t TS2;
   uint8_t TS1;
@@ -76,6 +74,19 @@ class STM32CAN{
       loopCallBack = callback;
     }
 
+    void handleHalIRQ(){
+      HAL_CAN_IRQHandler(&canHandle);
+    }
+
+    void notifyRxFromISR(CAN_HandleTypeDef* handle){
+      if (handle != &canHandle || RxTaskHandle == nullptr) {
+        return;
+      }
+      BaseType_t higherPriorityTaskWoken = pdFALSE;
+      vTaskNotifyGiveFromISR(RxTaskHandle, &higherPriorityTaskWoken);
+      portYIELD_FROM_ISR(higherPriorityTaskWoken);
+    }
+
     TaskHandle_t RxTaskHandle = NULL;
     TaskHandle_t LoopTaskHandle = NULL;
     TaskHandle_t TxTaskHandle = NULL;
@@ -83,30 +94,15 @@ class STM32CAN{
     QueueHandle_t txQueue = nullptr;
     
   private:
-    //内部関数を追加
     bool CANSendToFreeMailbox(twai_message_t* msg);
 
     void CANReceiveHardware(twai_message_t* msg);
 
-    void CANSetGpio(
-      GPIO_TypeDef* addr,
-      uint8_t index,
-      uint8_t afry,
-      uint8_t speed
-    );
-
-    void CANSetFilter(
-      uint8_t index,
-      uint8_t scale,
-      uint8_t mode,
-      uint8_t fifo,
-      uint32_t bank1,
-      uint32_t bank2
-    );
-
     CAN_bit_timing_config_t ConvBaudrate(long baud);
 
     bool CANinit(long bitrate, CANPinTypes selectPin);
+
+    CAN_HandleTypeDef canHandle{};
 
 
     //受信コールバック関数のポインタ
@@ -126,14 +122,12 @@ class STM32CAN{
 
         Serial.println("Rx割り込みからタスクに実行通知が送られました");
 
-        while (CAN1->RF0R & 0x3UL) {
+        while (HAL_CAN_GetRxFifoFillLevel(&self->canHandle, CAN_RX_FIFO0) > 0) {
           self->CANReceiveHardware(&msg);
           if (self->rxCallback) {
             self->rxCallback(msg);
           }
         }
-        // FIFOを処理し終わったのでRX IRQを再有効化
-        SET_BIT(CAN1->IER, CAN_IER_FMPIE0);
 
       }
     }
@@ -210,130 +204,6 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
 }
 
 
-/**
- * Initializes the CAN GPIO registers.
- *
- * @params: addr    - Specified GPIO register address.
- * @params: index   - Specified GPIO index.
- * @params: afry    - Specified Alternative function selection AF0-AF15.
- * @params: speed   - Specified OSPEEDR register value.(Optional)
- *
- */
-inline void STM32CAN::CANSetGpio(GPIO_TypeDef * addr, uint8_t index, uint8_t afry, uint8_t speed = 3) {
-  uint8_t _index2 = index * 2;
-  uint8_t _index4 = index * 4;
-  uint8_t ofs = 0;
-  uint8_t setting;
-
-  if (index > 7) {
-    _index4 = (index - 8) * 4;
-    ofs = 1;
-  }
-
-  uint32_t mask;
-  mask = 0xF << _index4;
-  CLEAR_BIT(addr->AFR[ofs], mask); // Reset alternate function
-  setting = afry;                  // Alternative function selection
-  mask = setting << _index4;
-  SET_BIT(addr->AFR[ofs], mask);   // Set alternate function
-  
-  mask = 0x3 << _index2;
-  CLEAR_BIT(addr->MODER, mask);    // Reset mode
-  setting = 0x2;                   // Alternate function mode
-  mask = setting << _index2;
-  SET_BIT(addr->MODER, mask);      // Set mode
-  
-  mask = 0x3 << _index2;
-  CLEAR_BIT(addr->OSPEEDR, mask);  // Reset speed
-  setting = speed;
-  mask = setting << _index2;
-  SET_BIT(addr->OSPEEDR, mask);    // Set speed
-
-  mask = 0x1 << index;
-  CLEAR_BIT(addr->OTYPER, mask);   // Reset Output push-pull
-
-  //mask = 0x3 << _index2;
-  //SET_BIT(addr->PUPDR, mask);      // Reset port pull-up/pull-down
-  
-  //mask = 0x3 << _index2;
-  //CLEAR_BIT(addr->PUPDR, mask); // Reset port pull-up/pull-down
-  //SET_BIT(addr->PUPDR, 0x1 << _index2); // Pull-Up  
-}
-
-
-/**
- * CANフィルタのレジスタを初期化します。
- * 
- * The bxCAN provides up to 14 scalable/configurable identifier filter banks, for selecting the incoming messages, that the software needs and discarding the others.
- *
- * @preconditions   - This register can be written only when the filter initialization mode is set (FINIT=1) in the CAN_FMR register.
- * @params: index   - Specified filter index. index 27:14 are available in connectivity line devices only.
- * @params: scale   - Select filter scale.
- *                    0: Dual 16-bit scale configuration
- *                    1: Single 32-bit scale configuration
- * @params: mode    - Select filter mode.
- *                    0: Two 32-bit registers of filter bank x are in Identifier Mask mode
- *                    1: Two 32-bit registers of filter bank x are in Identifier List mode
- * @params: fifo    - Select filter assigned.
- *                    0: Filter assigned to FIFO 0
- *                    1: Filter assigned to FIFO 1
- * @params: bank1   - Filter bank register 1
- * @params: bank2   - Filter bank register 2
- *
- */
-inline void STM32CAN::CANSetFilter(uint8_t index, uint8_t scale, uint8_t mode, uint8_t fifo, uint32_t bank1, uint32_t bank2) {
-  if (index > 13) return;
-
-  CAN1->FA1R &= ~(0x1UL<<index);               // Deactivate filter
-
-  if (scale == 0) {
-    CAN1->FS1R &= ~(0x1UL<<index);             // Set filter to Dual 16-bit scale configuration
-  } else {
-    CAN1->FS1R |= (0x1UL<<index);              // Set filter to single 32 bit configuration
-  }
-  if (mode == 0) {
-    CAN1->FM1R &= ~(0x1UL<<index);             // Set filter to Mask mode
-  } else {
-    CAN1->FM1R |= (0x1UL<<index);              // Set filter to List mode
-  }
-
-  if (fifo == 0) {
-    CAN1->FFA1R &= ~(0x1UL<<index);            // Set filter assigned to FIFO 0
-  } else {
-    CAN1->FFA1R |= (0x1UL<<index);             // Set filter assigned to FIFO 1
-  }
-
-  CAN1->sFilterRegister[index].FR1 = bank1;    // Set filter bank registers1
-  CAN1->sFilterRegister[index].FR2 = bank2;    // Set filter bank registers2
-
-  CAN1->FA1R |= (0x1UL<<index);                // Activate filter
-
-}
-
-/*
-struct CAN_bit_timing_config_t{
-  uint8_t TS2;
-  uint8_t TS1;
-  uint8_t BRP;
-};
-
-Serial.print("APB1 clock = ");
-Serial.println(HAL_RCC_GetPCLK1Freq());
-
-PCLK1 = 32MHz
-BRP 1~1024
-TS1 0~15
-TS2 0~7
-
-CAN bitrate = PCLK1 / (BRP × (1 + TS1 + TS2))
-       1MHz = 32MHz / (2*(1+12+3))
-     0.5MHz = 32MHz / (4*(1+12+3))
-    0.25MHz = 32MHz / (8*(1+12+3))
-   0.125MHz = 32MHz / (16*(1+12+3))
-     0.1MHz = 32MHz / (20*(1+12+3))
-    0.05MHz = 32MHz / (40*(1+12+3))
-*/
-
 inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
   switch(baud){
     case (long)50E3:
@@ -353,83 +223,68 @@ inline CAN_bit_timing_config_t STM32CAN::ConvBaudrate(long baud){
   }
 }
 
-
 bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
-  RCC->APB1ENR |= RCC_APB1ENR_CANEN;
-
-  //Serial.print("APB1 clock = ");
-  //Serial.println(HAL_RCC_GetPCLK1Freq());
-  switch(selectPin){
-    case PA12_PA11:
-      RCC->AHBENR |= 0x20000UL;           // GPIOAクロックの有効化
-      CANSetGpio(GPIOA, 11, STM32_AF9);         // STM32_AF9にPA11を設定
-      CANSetGpio(GPIOA, 12, STM32_AF9);         // STM32_AF9にPA12を設定
-      break;
-    default:
-      return false;
-      //例外値は無視
+  if (selectPin != PA12_PA11) {
+    return false;
   }
 
-  CAN1->MCR |= 0x1UL;                   // CANを初期化状態にする
-  while (!(CAN1->MSR & 0x1UL));         // 初期化状態になるのを待つ
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_CAN1_CLK_ENABLE();
 
-  CAN1->MCR = 0;
-  CAN1->MCR |= CAN_MCR_ABOM;
+  GPIO_InitTypeDef gpioConfig{};
+  gpioConfig.Pin = GPIO_PIN_11 | GPIO_PIN_12;
+  gpioConfig.Mode = GPIO_MODE_AF_PP;
+  gpioConfig.Pull = GPIO_NOPULL;
+  gpioConfig.Speed = GPIO_SPEED_FREQ_HIGH;
+  gpioConfig.Alternate = GPIO_AF9_CAN;
+  HAL_GPIO_Init(GPIOA, &gpioConfig);
 
-  //書き込み可能にする
-  CAN1->MCR |= CAN_MCR_INRQ;
-
-  // ビットレートを設定 
   CAN_bit_timing_config_t configData = ConvBaudrate(bitrate);
 
-  
-  CAN1->BTR &= ~(((0x03) << 24) | ((0x07) << 20) | ((0x0F) << 16) | (0x3FF)); 
-  CAN1->BTR |= (((configData.TS2-1) & 0x07) << 20) | (((configData.TS1-1) & 0x0F) << 16) | ((configData.BRP-1) & 0x3FF);
+  canHandle.Instance = CAN1;
+  canHandle.Init.Prescaler = configData.BRP;
+  canHandle.Init.Mode = CAN_MODE_NORMAL;
+  canHandle.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  canHandle.Init.TimeSeg1 = CAN_BS1_12TQ;
+  canHandle.Init.TimeSeg2 = CAN_BS2_3TQ;
+  canHandle.Init.TimeTriggeredMode = DISABLE;
+  canHandle.Init.AutoBusOff = ENABLE;
+  canHandle.Init.AutoWakeUp = DISABLE;
+  canHandle.Init.AutoRetransmission = ENABLE;
+  canHandle.Init.ReceiveFifoLocked = DISABLE;
+  canHandle.Init.TransmitFifoPriority = DISABLE;
 
   #if defined(LOOPBACK)
   Serial.println("ループバックを有効化します");
-  CAN1->BTR |= CAN_BTR_LBKM;
+  canHandle.Init.Mode = CAN_MODE_LOOPBACK;
   #endif
-  
-  //書き込みを終了する
-  CAN1->MCR &= ~CAN_MCR_INRQ;
 
-  // フィルターの設定
-  CAN1->FMR |= 0x1UL; // フィルターを初期化状態にする
-
-  // フィルター0を初期化
-  // Single 32-bit scale configuration 
-  // Two 32-bit registers of filter bank x are in Identifier Mask mode
-  // Filter assigned to FIFO 0 
-  // Filter bank register to all 0
-  CANSetFilter(0, 1, 0, 0, 0x0UL, 0x0UL); 
-
-  CAN1->FMR &= ~(0x1UL);                // Deactivate initialization mode
-  bool can1 = false;
-  CAN1->MCR &= ~(0x1UL);                // Require CAN1 to normal mode 
-
-  //割り込み有効化
-  
-  // RX FIFO0 message pending interrupt
-  CAN1->IER |= CAN_IER_FMPIE0;
-
-  // RxのNVICによる割り込み有効化
-  NVIC_SetPriority(USB_LP_CAN_RX0_IRQn, 5);
-  NVIC_EnableIRQ(USB_LP_CAN_RX0_IRQn);
-  // Wait for normal mode
-  // If the connection is not correct, it will not return to normal mode.
-  uint16_t TimeoutMilliseconds = 1000;
-  uint16_t wait_ack = 0;
-  while(wait_ack < TimeoutMilliseconds){
-    wait_ack++;
-    if ((CAN1->MSR & 0x1UL) == 0) {
-      can1 = true;
-      break;
-    }
-    delay(1);
+  if (HAL_CAN_Init(&canHandle) != HAL_OK) {
+    return false;
   }
 
-  return !!can1;
+  CAN_FilterTypeDef filterConfig{};
+  filterConfig.FilterBank = 0;
+  filterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+  filterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+  filterConfig.FilterIdHigh = 0;
+  filterConfig.FilterIdLow = 0;
+  filterConfig.FilterMaskIdHigh = 0;
+  filterConfig.FilterMaskIdLow = 0;
+  filterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+  filterConfig.FilterActivation = ENABLE;
+  filterConfig.SlaveStartFilterBank = 14;
+  if (HAL_CAN_ConfigFilter(&canHandle, &filterConfig) != HAL_OK ||
+      HAL_CAN_ActivateNotification(&canHandle, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
+    return false;
+  }
+
+  NVIC_SetPriority(USB_LP_CAN_RX0_IRQn, 5);
+  NVIC_EnableIRQ(USB_LP_CAN_RX0_IRQn);
+  if (HAL_CAN_Start(&canHandle) != HAL_OK) {
+    return false;
+  }
+  return true;
 }
 
 
@@ -441,103 +296,48 @@ bool STM32CAN::CANinit(long bitrate, CANPinTypes selectPin){
  * 
  */
 inline void STM32CAN::CANReceiveHardware(twai_message_t* CAN_rx_msg){
-  uint32_t id = CAN1->sFIFOMailBox[0].RIR;
-  if ((id & STM32_CAN_RIR_IDE) == 0) { // Standard frame format
-      CAN_rx_msg->extd = STANDARD_FORMAT;;
-      CAN_rx_msg->identifier = (CAN_STD_ID_MASK & (id >> 21U));
-  } 
-  else {                               // Extended frame format
-      CAN_rx_msg->extd = EXTENDED_FORMAT;;
-      CAN_rx_msg->identifier = (CAN_EXT_ID_MASK & (id >> 3U));
+  CAN_RxHeaderTypeDef header{};
+  uint8_t data[8]{};
+  if (HAL_CAN_GetRxMessage(&canHandle, CAN_RX_FIFO0, &header, data) != HAL_OK) {
+    return;
   }
 
-  if ((id & STM32_CAN_RIR_RTR) == 0) { // Data frame
-      CAN_rx_msg->rtr = DATA_FRAME;
-  }
-  else {                               // Remote frame
-      CAN_rx_msg->rtr = REMOTE_FRAME;
-  }
-  
-  CAN_rx_msg->data_length_code = (CAN1->sFIFOMailBox[0].RDTR) & 0xFUL;
-  
-  CAN_rx_msg->data[0] = 0xFFUL &  CAN1->sFIFOMailBox[0].RDLR;
-  CAN_rx_msg->data[1] = 0xFFUL & (CAN1->sFIFOMailBox[0].RDLR >> 8);
-  CAN_rx_msg->data[2] = 0xFFUL & (CAN1->sFIFOMailBox[0].RDLR >> 16);
-  CAN_rx_msg->data[3] = 0xFFUL & (CAN1->sFIFOMailBox[0].RDLR >> 24);
-  CAN_rx_msg->data[4] = 0xFFUL &  CAN1->sFIFOMailBox[0].RDHR;
-  CAN_rx_msg->data[5] = 0xFFUL & (CAN1->sFIFOMailBox[0].RDHR >> 8);
-  CAN_rx_msg->data[6] = 0xFFUL & (CAN1->sFIFOMailBox[0].RDHR >> 16);
-  CAN_rx_msg->data[7] = 0xFFUL & (CAN1->sFIFOMailBox[0].RDHR >> 24);
-
-  // Release FIFO 0 output mailbox.
-  // Make the next incoming message available.
-  CAN1->RF0R |= 0x20UL;
+  CAN_rx_msg->extd = header.IDE == CAN_ID_EXT ? EXTENDED_FORMAT : STANDARD_FORMAT;
+  CAN_rx_msg->rtr = header.RTR == CAN_RTR_REMOTE ? REMOTE_FRAME : DATA_FRAME;
+  CAN_rx_msg->identifier = header.IDE == CAN_ID_EXT ? header.ExtId : header.StdId;
+  CAN_rx_msg->data_length_code = static_cast<uint8_t>(header.DLC);
+  memcpy(CAN_rx_msg->data, data, sizeof(data));
 }
 
 
 //空きMainboxにデータを送る
 inline bool STM32CAN::CANSendToFreeMailbox(twai_message_t* CAN_tx_msg){
-  uint8_t mailbox;
-
-  // 空きMailbox探索
-  if (CAN1->TSR & CAN_TSR_TME0) {
-    mailbox = 0;
-  }else if (CAN1->TSR & CAN_TSR_TME1) {
-    mailbox = 1;
-  }else if (CAN1->TSR & CAN_TSR_TME2) {
-    mailbox = 2;
-  }else {
+  if (CAN_tx_msg->data_length_code > 8) {
     return false;
   }
 
-  uint32_t out = 0;
+  CAN_TxHeaderTypeDef header{};
+  header.IDE = CAN_tx_msg->extd == EXTENDED_FORMAT ? CAN_ID_EXT : CAN_ID_STD;
+  header.StdId = CAN_tx_msg->identifier & CAN_STD_ID_MASK;
+  header.ExtId = CAN_tx_msg->identifier & CAN_EXT_ID_MASK;
+  header.RTR = CAN_tx_msg->rtr == REMOTE_FRAME ? CAN_RTR_REMOTE : CAN_RTR_DATA;
+  header.DLC = CAN_tx_msg->data_length_code;
+  header.TransmitGlobalTime = DISABLE;
 
-  // ID設定
-  if (CAN_tx_msg->extd == EXTENDED_FORMAT) {
-    out = ((CAN_tx_msg->identifier & CAN_EXT_ID_MASK) << 3U) | STM32_CAN_TIR_IDE;
-  }else {
-    out = ((CAN_tx_msg->identifier & CAN_STD_ID_MASK) << 21U);
+  uint32_t mailbox;
+  return HAL_CAN_AddTxMessage(&canHandle, &header, CAN_tx_msg->data, &mailbox) == HAL_OK;
+}
+
+extern "C" void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* handle){
+  if (STM32CAN::instance != nullptr) {
+    STM32CAN::instance->notifyRxFromISR(handle);
   }
-
-  // RTR
-  if (CAN_tx_msg->rtr == REMOTE_FRAME) {
-    out |= STM32_CAN_TIR_RTR;
-  }
-
-  // DLC
-  CAN1->sTxMailBox[mailbox].TDTR = (CAN_tx_msg->data_length_code & 0xFUL);
-
-  // DATA LOW
-  CAN1->sTxMailBox[mailbox].TDLR = 
-   (((uint32_t)CAN_tx_msg->data[3] << 24) |
-   ((uint32_t)CAN_tx_msg->data[2] << 16) |
-   ((uint32_t)CAN_tx_msg->data[1] << 8 ) |
-   ((uint32_t)CAN_tx_msg->data[0]));
-
-  // DATA HIGH
-  CAN1->sTxMailBox[mailbox].TDHR =
-   (((uint32_t)CAN_tx_msg->data[7] << 24) |
-   ((uint32_t)CAN_tx_msg->data[6] << 16) |
-   ((uint32_t)CAN_tx_msg->data[5] << 8 ) |
-   ((uint32_t)CAN_tx_msg->data[4]));
-
-  // 送信開始
-  CAN1->sTxMailBox[mailbox].TIR = out | STM32_CAN_TIR_TXRQ;
-
-  return true;
 }
 
 extern "C" void USB_LP_CAN_RX0_IRQHandler(){
-  BaseType_t higherPriorityTaskWoken = pdFALSE;
-  CLEAR_BIT(CAN1->IER, CAN_IER_FMPIE0); //割り込みの連鎖が起きるのを防ぐために一旦無効化
-  // RX Taskに通知
-  if(STM32CAN::instance->RxTaskHandle){
-    vTaskNotifyGiveFromISR(
-      STM32CAN::instance->RxTaskHandle,
-      &higherPriorityTaskWoken
-    );
+  if (STM32CAN::instance != nullptr) {
+    STM32CAN::instance->handleHalIRQ();
   }
-  portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
 
 #endif

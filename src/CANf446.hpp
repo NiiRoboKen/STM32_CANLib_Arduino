@@ -4,6 +4,8 @@
 
 #include <STM32FreeRTOS.h>
 #include <Arduino.h>
+#include <stm32f4xx_hal.h>
+
 
 #if defined(STM32F4xx)
 
