@@ -2,12 +2,11 @@
 
 #pragma once 
 
+#if defined(STM32F4xx)
+
 #include <STM32FreeRTOS.h>
 #include <Arduino.h>
 #include <stm32f4xx_hal.h>
-
-
-#if defined(STM32F4xx)
 
 //定数
 #define CAN_STD_ID_MASK  0x000007FFUL

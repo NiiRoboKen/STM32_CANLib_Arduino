@@ -8,7 +8,7 @@
 #if defined(STM32F3xx)
 
 //ループバックの有効化
-//#define LOOPBACK
+#define LOOPBACK
 
 //定数
 constexpr uint8_t STM32_AF9 = 0x09;
@@ -182,7 +182,6 @@ bool STM32CAN::begin(long bitrate, CANPinTypes SelectPin){
   //タスクを作成
   BaseType_t isMainLoopTaskCreated, isRxTaskCreated, isTxTaskCreated;
 
-  
   isRxTaskCreated = xTaskCreate(rxTask, "CAN_RX_Task", 512, this, 2, &RxTaskHandle);
   Serial.print("受信タスクを作成しました: ");
   Serial.println(isRxTaskCreated);

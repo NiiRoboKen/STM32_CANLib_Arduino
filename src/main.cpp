@@ -91,37 +91,22 @@ void RxCallBack(twai_message_t msg){
   Serial.println(msg.data[7]); //7
 }
 
-volatile bool a = false;
 void mainLoop(){
-  if(!a){
-    Serial.println("mainloop call!");
+  Serial.println("mainloop call!");
 
-    twai_message_t msg{};
+  twai_message_t msg{};
 
-    msg.extd = STANDARD_FORMAT;
-    msg.rtr = DATA_FRAME;
-    msg.identifier = 0x123;
-    msg.data_length_code = 8;
+  msg.extd = STANDARD_FORMAT;
+  msg.rtr = DATA_FRAME;
+  msg.identifier = 0x123;
+  msg.data_length_code = 8;
 
-    for (int i = 0; i < 8; i++) {
-      msg.data[i] = i;
-    }
-
-    Serial.println(can.send(msg));
-
-    //Serial.printf("TSR = %08lX\n", CAN1->TSR);
-    //Serial.printf("ESR = %08lX\n", CAN1->ESR);
-    //Serial.printf("TIR0 = %08lX\n", CAN1->sTxMailBox[0].TIR);
-
-    //a=true;
-
-    Serial.print("ESR = 0x");
-    Serial.println(CAN1->ESR, HEX);
-
-    Serial.print("TSR = 0x");
-    Serial.println(CAN1->TSR, HEX);
-    vTaskDelay(1000);
+  for (int i = 0; i < 8; i++) {
+    msg.data[i] = i;
   }
+
+  Serial.println(can.send(msg));  
+  vTaskDelay(1000);
 }
 
 void setup(){
